@@ -9,7 +9,7 @@ export type ImportedTrendPoint = {
   issued: number;
   returned: number;
   completed: number;
-  byLine?: Record<DataLine, { issued: number; returned: number; completed: number }>;
+  byLine?: Record<DataLine, { issued: number; returned: number; completed: number; hasData?: boolean }>;
 };
 
 export type ImportedRateWeights = {
@@ -55,6 +55,7 @@ export type ImportedPerson = {
   pending: number;
   quality: number;
   days: number[];
+  dayDates?: string[];
 };
 
 export type ImportedRuleVersion = {
@@ -101,6 +102,7 @@ export type ImportedDashboardModel = {
   };
   metrics: Record<DataLine, Partial<LineMetric>>;
   rateWeights: Record<DataLine, ImportedRateWeights>;
+  weeklyQuality: Record<DataLine, { selected: number; completed: number }>;
   forecast: Record<DataLine, ImportedForecast>;
   workdayTrend?: ImportedTrendPoint[];
   qualityPools?: ImportedQualityPool[];
@@ -132,10 +134,10 @@ const SCHEMAS: Array<{ key: TableKey; id: string[]; required: string[] }> = [
   { key: "作业批次", id: ["作业批次ID"], required: ["作业批次ID", "数据线", "原始批次ID", "计划作业量"] },
   { key: "发放记录", id: ["发放单ID"], required: ["发放单ID", "日期", "数据线", "发放性质", "库存扣减量"] },
   { key: "标注分配", id: ["分配ID"], required: ["分配ID", "发放单ID", "数据线", "人员", "分配任务量", "开始日期"] },
-  { key: "回收记录", id: ["回收记录ID"], required: ["回收记录ID", "回收日期", "分配ID", "发放单ID", "数据线", "回收类型", "本次回收量", "其中完成量", "其中未完成量"] },
+  { key: "回收记录", id: ["回收记录ID"], required: ["回收记录ID", "回收日期", "分配ID", "发放单ID", "数据线", "人员", "回收类型", "本次回收量", "其中完成量", "其中未完成量"] },
   { key: "双标结果", id: ["双标结果ID"], required: ["双标结果ID", "发放单ID", "数据线", "已完成唯一题目", "形成结果的双标量", "双标一致", "双标不一致"] },
   { key: "质检方案", id: ["质检方案ID"], required: ["质检方案ID", "制定日期", "数据线", "抽检池", "池内可抽数量", "计划抽取量", "实际抽取量"] },
-  { key: "质检分配", id: ["质检分配ID"], required: ["质检分配ID", "质检方案ID", "数据线", "完成量", "通过", "不通过", "存疑", "完成日期"] },
+  { key: "质检分配", id: ["质检分配ID"], required: ["质检分配ID", "质检方案ID", "数据线", "质检人员", "分配量", "完成量", "通过", "不通过", "存疑", "完成日期"] },
   { key: "异动记录", id: ["异动ID"], required: ["异动ID", "日期", "数据线", "来源分配ID", "异动类型"] },
   { key: "每日库存", id: ["日期", "数据线"], required: ["日期", "数据线", "期末库存", "预计支撑天数"] },
   { key: "规则版本", id: ["规则版本ID"], required: ["规则版本ID", "数据线", "规则类型", "版本号"] },
@@ -149,7 +151,7 @@ const NUMERIC_FIELDS: Partial<Record<TableKey, string[]>> = {
   回收记录: ["本次回收量", "其中完成量", "其中未完成量"],
   双标结果: ["已完成唯一题目", "形成结果的双标量", "双标一致", "双标不一致"],
   质检方案: ["池内可抽数量", "计划抽取量", "实际抽取量"],
-  质检分配: ["完成量", "通过", "不通过", "存疑"],
+  质检分配: ["分配量", "完成量", "通过", "不通过", "存疑"],
   每日库存: ["期末库存", "预计支撑天数"],
 };
 
@@ -379,19 +381,37 @@ export function buildImportedDashboardModel(inputs: CsvInput[]): ImportedDashboa
   const annotationRows = tables.get("标注分配") ?? [];
   const changeRows = tables.get("异动记录") ?? [];
   const annotationById = new Map(annotationRows.map((record) => [record["分配ID"], record]));
-  const returnRows = (tables.get("回收记录") ?? []).filter((record) => {
+  const linkedReturnRows = (tables.get("回收记录") ?? []).filter((record) => {
+    const returned = toNumber(record["本次回收量"]);
+    const completed = toNumber(record["其中完成量"]);
+    const incomplete = toNumber(record["其中未完成量"]);
+    if (completed > returned || completed + incomplete !== returned) {
+      warnings.push(`回收 ${record["回收记录ID"]} 的回收、完成与未完成数量不守恒，已跳过。`);
+      return false;
+    }
     if (!tables.has("标注分配")) return true;
     const source = annotationById.get(record["分配ID"]);
     if (!source) {
       warnings.push(`回收 ${record["回收记录ID"]} 未找到来源分配 ${record["分配ID"]}，已跳过。`);
       return false;
     }
-    if (source["数据线"] !== record["数据线"] || source["发放单ID"] !== record["发放单ID"]) {
-      warnings.push(`回收 ${record["回收记录ID"]} 与来源分配 ${record["分配ID"]} 的数据线或发放单不一致，已跳过。`);
+    if (source["数据线"] !== record["数据线"] || source["发放单ID"] !== record["发放单ID"] || source["人员"] !== record["人员"]) {
+      warnings.push(`回收 ${record["回收记录ID"]} 与来源分配 ${record["分配ID"]} 的数据线、发放单或人员不一致，已跳过。`);
       return false;
     }
     return true;
   });
+  const invalidReturnAssignments = new Set<string>();
+  if (tables.has("标注分配")) {
+    for (const assignment of annotationRows) {
+      const related = linkedReturnRows.filter((record) => record["分配ID"] === assignment["分配ID"] && (!record["回收日期"] || dateKey(record["回收日期"])));
+      if (sum(related, "本次回收量") > toNumber(assignment["分配任务量"])) {
+        invalidReturnAssignments.add(assignment["分配ID"]);
+        warnings.push(`分配 ${assignment["分配ID"]} 的累计回收量超过分配任务量，相关回收已跳过。`);
+      }
+    }
+  }
+  const returnRows = linkedReturnRows.filter((record) => !invalidReturnAssignments.has(record["分配ID"]));
 
   const dateFields: Array<[TableKey, RecordRow[], string]> = [
     ["每日库存", daily, "日期"],
@@ -433,6 +453,10 @@ export function buildImportedDashboardModel(inputs: CsvInput[]): ImportedDashboa
   const rateWeights: Record<DataLine, ImportedRateWeights> = {
     SFT: { doubleEligible: 0, consistencyResolved: 0 },
     RL: { doubleEligible: 0, consistencyResolved: 0 },
+  };
+  const weeklyQuality: Record<DataLine, { selected: number; completed: number }> = {
+    SFT: { selected: 0, completed: 0 },
+    RL: { selected: 0, completed: 0 },
   };
   const forecast: Record<DataLine, ImportedForecast> = { SFT: {}, RL: {} };
   const batches: ImportedBatch[] = [];
@@ -528,8 +552,15 @@ export function buildImportedDashboardModel(inputs: CsvInput[]): ImportedDashboa
 
   const qualityPools: ImportedQualityPool[] = [];
   for (const line of LINES) {
+    const lineWeeklyPlans = lineRows(qualityPlans, line);
+    weeklyQuality[line] = {
+      selected: sum(lineWeeklyPlans, "实际抽取量"),
+      completed: lineWeeklyPlans.reduce((total, plan) => total + (tables.has("质检分配")
+        ? sum(assignmentsByPlan.get(plan["质检方案ID"]) ?? [], "完成量")
+        : toNumber(plan["已质检数量"])), 0),
+    };
     const pools = new Map<string, ImportedQualityPool>();
-    for (const plan of lineRows(qualityPlans, line)) {
+    for (const plan of lineRows(currentPlans, line)) {
       const poolName = plan["抽检池"] || "未分类";
       const aggregate = pools.get(poolName) ?? {
         line,
@@ -554,7 +585,7 @@ export function buildImportedDashboardModel(inputs: CsvInput[]): ImportedDashboa
     }
 
     for (const pool of pools.values()) {
-      const relatedPlans = lineRows(qualityPlans, line).filter((record) => (record["抽检池"] || "未分类") === pool.pool);
+      const relatedPlans = lineRows(currentPlans, line).filter((record) => (record["抽检池"] || "未分类") === pool.pool);
       pool.plannedRate = pool.eligible ? (sum(relatedPlans, "计划抽取量") / pool.eligible) * 100 : 0;
       pool.actualRate = pool.eligible ? (pool.selected / pool.eligible) * 100 : 0;
       if (pool.completed > pool.selected) warnings.push(`${line} · ${pool.pool} 的质检完成量超过实际抽取量。`);
@@ -582,10 +613,10 @@ export function buildImportedDashboardModel(inputs: CsvInput[]): ImportedDashboa
     ...issueRows.map((record) => dateKey(record["日期"])),
     ...returnRows.map((record) => dateKey(record["回收日期"])),
   ].filter((value): value is string => value !== undefined && (!reportDate || value <= reportDate)))).sort();
-  const recentDates = availableDates.slice(-5);
 
   const workdayTrend = availableDates.map((date) => {
-    const inventoryFor = (line: DataLine) => toNumber(daily.find((record) => record["数据线"] === line && dateKey(record["日期"]) === date)?.["期末库存"]);
+    const inventoryRecordFor = (line: DataLine) => daily.find((record) => record["数据线"] === line && dateKey(record["日期"]) === date);
+    const inventoryFor = (line: DataLine) => toNumber(inventoryRecordFor(line)?.["期末库存"]);
     const issues = issueRows.filter((record) => dateKey(record["日期"]) === date && record["发放性质"] === "首次发放");
     const returns = returnRows.filter((record) => dateKey(record["回收日期"]) === date && record["回收类型"] === "首次回收");
     const byLine = Object.fromEntries(LINES.map((line) => {
@@ -595,8 +626,9 @@ export function buildImportedDashboardModel(inputs: CsvInput[]): ImportedDashboa
         issued: sum(lineIssues, "库存扣减量"),
         returned: sum(lineReturns, "本次回收量"),
         completed: sum(lineReturns, "其中完成量"),
+        hasData: Boolean(inventoryRecordFor(line) || lineIssues.length || lineReturns.length),
       }];
-    })) as Record<DataLine, { issued: number; returned: number; completed: number }>;
+    })) as Record<DataLine, { issued: number; returned: number; completed: number; hasData?: boolean }>;
     return {
       date: shortDate(date),
       sftInventory: inventoryFor("SFT"),
@@ -627,7 +659,7 @@ export function buildImportedDashboardModel(inputs: CsvInput[]): ImportedDashboa
     const person = peopleMap.get(key) ?? { name: record["质检人员"], line, role: "质检", assigned: 0, completed: 0, pending: 0, quality: 0, days: [] };
     person.assigned += toNumber(record["分配量"]);
     const completedOn = dateKey(record["完成日期"]);
-    if (!completedOn || !reportDate || completedOn <= reportDate) person.completed += toNumber(record["完成量"]);
+    if (!record["完成日期"] || (completedOn && (!reportDate || completedOn <= reportDate))) person.completed += toNumber(record["完成量"]);
     peopleMap.set(key, person);
   }
 
@@ -635,19 +667,19 @@ export function buildImportedDashboardModel(inputs: CsvInput[]): ImportedDashboa
     if (person.role === "质检") {
       const related = currentAssignments.filter((record) => record["数据线"] === person.line && record["质检人员"] === person.name);
       person.quality = person.completed ? (sum(related, "通过") / person.completed) * 100 : 0;
-      const daily = recentDates.map((date) => sum(related.filter((record) => dateKey(record["完成日期"]) === date), "完成量"));
+      const daily = availableDates.map((date) => sum(related.filter((record) => dateKey(record["完成日期"]) === date), "完成量"));
       const max = Math.max(...daily, 1);
       person.days = daily.map((value) => Math.round((value / max) * 100));
     } else {
-      const related = returnRows.filter((record) => record["数据线"] === person.line && record["人员"] === person.name && (!reportDate || (dateKey(record["回收日期"]) ?? "") <= reportDate));
+      const related = rowsThrough(lineRows(returnRows, person.line), "回收日期", reportDate).filter((record) => record["人员"] === person.name);
       person.completed = sum(related, "其中完成量");
       person.quality = person.assigned ? (person.completed / person.assigned) * 100 : 0;
-      const daily = recentDates.map((date) => sum(related.filter((record) => dateKey(record["回收日期"]) === date), "其中完成量"));
+      const daily = availableDates.map((date) => sum(related.filter((record) => dateKey(record["回收日期"]) === date), "其中完成量"));
       const max = Math.max(...daily, 1);
       person.days = daily.map((value) => Math.round((value / max) * 100));
     }
     person.pending = Math.max(0, person.assigned - person.completed);
-    while (person.days.length < 5) person.days.unshift(0);
+    person.dayDates = availableDates.map(shortDate);
     return person;
   });
 
@@ -744,6 +776,7 @@ export function buildImportedDashboardModel(inputs: CsvInput[]): ImportedDashboa
     },
     metrics,
     rateWeights,
+    weeklyQuality,
     forecast,
     workdayTrend: workdayTrend.length ? workdayTrend : undefined,
     qualityPools: qualityPools.length ? qualityPools : undefined,

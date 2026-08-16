@@ -21,6 +21,7 @@ import {
   type ImportedDashboardModel,
   type ImportedForecast,
   type ImportedFollowup,
+  type ImportedPerson,
   type ImportedReturnCohort,
   type ImportedTrendPoint,
 } from "./dashboard-model";
@@ -136,8 +137,7 @@ export default function Home() {
     return source
       .filter((day) => {
         const values = day.byLine?.[line];
-        const inventory = line === "SFT" ? day.sftInventory : day.rlInventory;
-        return !values || inventory > 0 || values.issued > 0 || values.returned > 0 || values.completed > 0;
+        return !values || values.hasData !== false;
       })
       .slice(-5)
       .map((day) => ({ ...day, ...(day.byLine?.[line] ?? {}) }));
@@ -149,6 +149,12 @@ export default function Home() {
   const reportDate = imported ? (imported.report.reportDate ?? "未识别") : "2026-08-14";
 
   const metric = (key: keyof typeof lineMetrics.SFT) => line === "ALL" ? combineLineMetric(key, activeMetrics, imported?.rateWeights) : activeMetrics[line][key];
+  const weeklyQualityMetric = (key: "selected" | "completed") => {
+    if (!imported) return metric(key === "selected" ? "qcSelected" : "qcCompleted");
+    return line === "ALL"
+      ? imported.weeklyQuality.SFT[key] + imported.weeklyQuality.RL[key]
+      : imported.weeklyQuality[line][key];
+  };
 
   const filteredPools = useMemo(() => activeQualityPools.filter((pool) => (line === "ALL" || pool.line === line) && (activePool === "全部抽检池" || pool.pool === activePool)), [line, activePool, activeQualityPools]);
   const filteredPeople = useMemo(() => activePeople.filter((person) => line === "ALL" || person.line === line), [line, activePeople]);
@@ -235,7 +241,7 @@ export default function Home() {
           {imported && <button className="reset-data" type="button" onClick={() => { setImported(null); setDrawer(null); }}>恢复演示数据</button>}
         </section>
 
-        {view === "overview" && <Overview metric={metric} line={line} trend={activeTrend} alertsData={activeAlerts} setView={setView} openAlert={openAlert} />}
+        {view === "overview" && <Overview metric={metric} weeklyQualityMetric={weeklyQualityMetric} line={line} trend={activeTrend} alertsData={activeAlerts} setView={setView} openAlert={openAlert} />}
         {view === "returns" && <Returns metric={metric} line={line} trend={activeTrend} cohort={filteredCohort} reasons={filteredReasons} followups={filteredFollowups} imported={Boolean(imported)} setDrawer={setDrawer} />}
         {view === "quality" && <Quality pools={filteredPools} activePool={activePool} setActivePool={setActivePool} setDrawer={setDrawer} />}
         {view === "people" && <PeopleBoard data={filteredPeople} trend={activeTrend} setDrawer={setDrawer} />}
@@ -251,13 +257,13 @@ export default function Home() {
   );
 }
 
-function Overview({ metric, line, trend, alertsData, setView, openAlert }: { metric: (key: keyof typeof lineMetrics.SFT) => number; line: LineFilter; trend: ImportedTrendPoint[]; alertsData: typeof alerts; setView: (view: ViewKey) => void; openAlert: (index: number) => void }) {
+function Overview({ metric, weeklyQualityMetric, line, trend, alertsData, setView, openAlert }: { metric: (key: keyof typeof lineMetrics.SFT) => number; weeklyQualityMetric: (key: "selected" | "completed") => number; line: LineFilter; trend: ImportedTrendPoint[]; alertsData: typeof alerts; setView: (view: ViewKey) => void; openAlert: (index: number) => void }) {
   const flow = [
     { label: "首次发放", value: metric("weekIssued"), pct: metric("weekIssued") ? 100 : 0 },
     { label: "已回收", value: metric("returned"), pct: percent(metric("returned"), metric("weekIssued")) },
     { label: "已完成", value: metric("completed"), pct: percent(metric("completed"), metric("weekIssued")) },
-    { label: "已抽检", value: metric("qcSelected"), pct: percent(metric("qcSelected"), metric("weekIssued")) },
-    { label: "质检完成", value: metric("qcCompleted"), pct: percent(metric("qcCompleted"), metric("weekIssued")) },
+    { label: "已抽检", value: weeklyQualityMetric("selected"), pct: percent(weeklyQualityMetric("selected"), metric("weekIssued")) },
+    { label: "质检完成", value: weeklyQualityMetric("completed"), pct: percent(weeklyQualityMetric("completed"), metric("weekIssued")) },
   ];
   return <>
     <section className="metric-grid">
@@ -315,14 +321,19 @@ function Quality({ pools, activePool, setActivePool, setDrawer }: { pools: typeo
   </>;
 }
 
-function PeopleBoard({ data, trend, setDrawer }: { data: typeof people; trend: ImportedTrendPoint[]; setDrawer: (drawer: DrawerContent) => void }) {
+function PeopleBoard({ data, trend, setDrawer }: { data: Array<(typeof people)[number] | ImportedPerson>; trend: ImportedTrendPoint[]; setDrawer: (drawer: DrawerContent) => void }) {
   const heatmapDates = trend.slice(-5).map((day) => day.date);
   while (heatmapDates.length < 5) heatmapDates.unshift(`D-${5 - heatmapDates.length}`);
-  return <><section className="metric-grid"><MetricCard label="快照参与人员" value={String(data.length)} note="截至报表日的标注与质检人员" tone="teal" /><MetricCard label="累计分配" value={formatNumber(data.reduce((sum, person) => sum + person.assigned, 0))} note="包含双标和返工工作量" tone="indigo" /><MetricCard label="累计完成" value={formatNumber(data.reduce((sum, person) => sum + person.completed, 0))} note="人员任务口径" tone="blue" /><MetricCard label="人员待完成" value={formatNumber(data.reduce((sum, person) => sum + person.pending, 0))} note="需要结合截止时间处理" tone="amber" /></section><section className="dashboard-grid equal"><article className="panel"><SectionTitle eyebrow="人员负载" title="分配与完成对比" /><div className="people-bars">{data.map((person) => <button key={`${person.line}-${person.role}-${person.name}`} type="button" onClick={() => setDrawer({ eyebrow: `${person.line} · ${person.role}`, title: person.name, metric: `完成率 ${percent(person.completed, person.assigned).toFixed(1)}%`, body: `分配 ${person.assigned}、完成 ${person.completed}、待完成 ${person.pending}，${person.role === "质检" ? "质检通过率" : "任务完成率"} ${person.quality.toFixed(1)}%。` })}><div><strong>{person.name}</strong><small>{person.line} · {person.role}</small></div><div className="person-progress"><i style={{ width: `${percent(person.completed, person.assigned)}%` }} /></div><span>{person.completed}/{person.assigned}</span></button>)}</div></article><article className="panel"><SectionTitle eyebrow="工作节奏" title="近5个工作日热力图" note="颜色越深代表当日负载越高" /><div className="heatmap"><div className="heat-head"><span>人员</span>{heatmapDates.map((date) => <b key={date}>{date}</b>)}</div>{data.map((person) => <div className="heat-row" key={`${person.line}-${person.role}-${person.name}`}><span>{person.name}</span>{person.days.map((value,index) => <i key={index} title={`${person.name} ${heatmapDates[index]} 负载 ${value}%`} style={{ opacity: Math.max(.16,value/100) }}>{value}</i>)}</div>)}</div></article></section></>;
+  const heatValues = (person: (typeof data)[number]) => heatmapDates.map((date, index) => {
+    const sourceIndex = "dayDates" in person && person.dayDates ? person.dayDates.indexOf(date) : index;
+    return sourceIndex >= 0 ? (person.days[sourceIndex] ?? 0) : 0;
+  });
+  return <><section className="metric-grid"><MetricCard label="快照参与人员" value={String(data.length)} note="截至报表日的标注与质检人员" tone="teal" /><MetricCard label="累计分配" value={formatNumber(data.reduce((sum, person) => sum + person.assigned, 0))} note="包含双标和返工工作量" tone="indigo" /><MetricCard label="累计完成" value={formatNumber(data.reduce((sum, person) => sum + person.completed, 0))} note="人员任务口径" tone="blue" /><MetricCard label="人员待完成" value={formatNumber(data.reduce((sum, person) => sum + person.pending, 0))} note="需要结合截止时间处理" tone="amber" /></section><section className="dashboard-grid equal"><article className="panel"><SectionTitle eyebrow="人员负载" title="分配与完成对比" /><div className="people-bars">{data.map((person) => <button key={`${person.line}-${person.role}-${person.name}`} type="button" onClick={() => setDrawer({ eyebrow: `${person.line} · ${person.role}`, title: person.name, metric: `完成率 ${percent(person.completed, person.assigned).toFixed(1)}%`, body: `分配 ${person.assigned}、完成 ${person.completed}、待完成 ${person.pending}，${person.role === "质检" ? "质检通过率" : "任务完成率"} ${person.quality.toFixed(1)}%。` })}><div><strong>{person.name}</strong><small>{person.line} · {person.role}</small></div><div className="person-progress"><i style={{ width: `${percent(person.completed, person.assigned)}%` }} /></div><span>{person.completed}/{person.assigned}</span></button>)}</div></article><article className="panel"><SectionTitle eyebrow="工作节奏" title="近5个工作日热力图" note="颜色越深代表当日负载越高" /><div className="heatmap"><div className="heat-head"><span>人员</span>{heatmapDates.map((date) => <b key={date}>{date}</b>)}</div>{data.map((person) => <div className="heat-row" key={`${person.line}-${person.role}-${person.name}`}><span>{person.name}</span>{heatValues(person).map((value,index) => <i key={index} title={`${person.name} ${heatmapDates[index]} 负载 ${value}%`} style={{ opacity: Math.max(.16,value/100) }}>{value}</i>)}</div>)}</div></article></section></>;
 }
 
 function InventoryBoard({ data, line, metric, trend, forecast, setDrawer }: { data: typeof batches; line: LineFilter; metric: (key: keyof typeof lineMetrics.SFT) => number; trend: ImportedTrendPoint[]; forecast?: Record<DataLine, ImportedForecast>; setDrawer: (drawer: DrawerContent) => void }) {
-  const maxInventory = Math.max(...trend.flatMap((day) => [day.sftInventory, day.rlInventory]), 1);
+  const inventoryValues = trend.flatMap((day) => line === "SFT" ? [day.sftInventory] : line === "RL" ? [day.rlInventory] : [day.sftInventory, day.rlInventory]);
+  const maxInventory = Math.max(...inventoryValues, 1);
   const forecastValue = (key: "dailyAverage" | "weekForecast") => {
     if (line !== "ALL") return forecast?.[line][key];
     const values = [forecast?.SFT[key], forecast?.RL[key]].filter((value): value is number => value !== undefined);
@@ -330,7 +341,7 @@ function InventoryBoard({ data, line, metric, trend, forecast, setDrawer }: { da
   };
   const dailyAverage = forecastValue("dailyAverage") ?? metric("weekIssued") / 5;
   const weekForecast = forecastValue("weekForecast") ?? metric("weekIssued");
-  return <><section className="metric-grid"><MetricCard label="当前库存" value={formatNumber(metric("inventory"))} note={`${line === "ALL" ? "两条数据线合计" : line}`} tone="blue" /><MetricCard label="日均消耗" value={formatNumber(dailyAverage)} note="近5个工作日首次发放" tone="indigo" /><MetricCard label="本周预计消耗" value={formatNumber(weekForecast)} note="不含双标、质检与重发" tone="teal" /><MetricCard label="预计可支撑" value={metric("supportDays").toFixed(1)} suffix=" 天" note="全部视图取两条线中的短板" tone="amber" /></section><section className="dashboard-grid two-one"><article className="panel"><SectionTitle eyebrow="库存趋势" title="SFT / RL 期末库存" note="新数据到达会形成向上跳点" /><div className="inventory-chart">{trend.map((day) => <div className="inventory-day" key={day.date}><div><i className="sft" title={`SFT ${day.sftInventory}`} style={{ height: `${(day.sftInventory/maxInventory)*100}%` }} /><i className="rl" title={`RL ${day.rlInventory}`} style={{ height: `${(day.rlInventory/maxInventory)*100}%` }} /></div><small>{day.date}</small></div>)}</div><div className="chart-legend"><span><i className="sft"/>SFT</span><span><i className="rl"/>RL</span></div></article><article className="panel"><SectionTitle eyebrow="情景预测" title="本周末库存" /><div className="scenario-list"><div><span>低消耗</span><b>{formatNumber(metric("inventory")-weekForecast*.8)}</b><i style={{ width: "80%" }}/></div><div className="base"><span>常规</span><b>{formatNumber(metric("inventory")-weekForecast)}</b><i style={{ width: "62%" }}/></div><div><span>高消耗</span><b>{formatNumber(Math.max(0,metric("inventory")-weekForecast*1.2))}</b><i style={{ width: "42%" }}/></div></div></article></section><article className="panel"><SectionTitle eyebrow="原始批次" title="批次消耗与结余" /><div className="batch-grid">{data.map((batch) => <button type="button" key={batch.id} onClick={() => setDrawer({ eyebrow: `${batch.line} · ${batch.status}`, title: batch.id, metric: `剩余 ${formatNumber(batch.remaining)}`, body: `收到 ${formatNumber(batch.received)}，累计首次发放 ${formatNumber(batch.used)}，适用规则 ${batch.version}。` })}><div><span>{batch.line}</span><b>{batch.status}</b></div><strong>{batch.id}</strong><div className="batch-progress"><i style={{ width: `${percent(batch.used, batch.received)}%` }} /></div><p><span>已用 {formatNumber(batch.used)}</span><span>剩余 {formatNumber(batch.remaining)}</span></p></button>)}</div></article></>;
+  return <><section className="metric-grid"><MetricCard label="当前库存" value={formatNumber(metric("inventory"))} note={`${line === "ALL" ? "两条数据线合计" : line}`} tone="blue" /><MetricCard label="日均消耗" value={formatNumber(dailyAverage)} note="近5个工作日首次发放" tone="indigo" /><MetricCard label="本周预计消耗" value={formatNumber(weekForecast)} note="不含双标、质检与重发" tone="teal" /><MetricCard label="预计可支撑" value={metric("supportDays").toFixed(1)} suffix=" 天" note="全部视图取两条线中的短板" tone="amber" /></section><section className="dashboard-grid two-one"><article className="panel"><SectionTitle eyebrow="库存趋势" title={line === "ALL" ? "SFT / RL 期末库存" : `${line} 期末库存`} note="新数据到达会形成向上跳点" /><div className="inventory-chart">{trend.map((day) => <div className="inventory-day" key={day.date}><div>{line !== "RL" && <i className="sft" title={`SFT ${day.sftInventory}`} style={{ height: `${(day.sftInventory/maxInventory)*100}%` }} />}{line !== "SFT" && <i className="rl" title={`RL ${day.rlInventory}`} style={{ height: `${(day.rlInventory/maxInventory)*100}%` }} />}</div><small>{day.date}</small></div>)}</div><div className="chart-legend">{line !== "RL" && <span><i className="sft"/>SFT</span>}{line !== "SFT" && <span><i className="rl"/>RL</span>}</div></article><article className="panel"><SectionTitle eyebrow="情景预测" title="本周末库存" /><div className="scenario-list"><div><span>低消耗</span><b>{formatNumber(metric("inventory")-weekForecast*.8)}</b><i style={{ width: "80%" }}/></div><div className="base"><span>常规</span><b>{formatNumber(metric("inventory")-weekForecast)}</b><i style={{ width: "62%" }}/></div><div><span>高消耗</span><b>{formatNumber(Math.max(0,metric("inventory")-weekForecast*1.2))}</b><i style={{ width: "42%" }}/></div></div></article></section><article className="panel"><SectionTitle eyebrow="原始批次" title="批次消耗与结余" /><div className="batch-grid">{data.map((batch) => <button type="button" key={batch.id} onClick={() => setDrawer({ eyebrow: `${batch.line} · ${batch.status}`, title: batch.id, metric: `剩余 ${formatNumber(batch.remaining)}`, body: `收到 ${formatNumber(batch.received)}，累计首次发放 ${formatNumber(batch.used)}，适用规则 ${batch.version}。` })}><div><span>{batch.line}</span><b>{batch.status}</b></div><strong>{batch.id}</strong><div className="batch-progress"><i style={{ width: `${percent(batch.used, batch.received)}%` }} /></div><p><span>已用 {formatNumber(batch.used)}</span><span>剩余 {formatNumber(batch.remaining)}</span></p></button>)}</div></article></>;
 }
 
 function VersionsBoard({ data, setDrawer }: { data: typeof ruleVersions; setDrawer: (drawer: DrawerContent) => void }) {

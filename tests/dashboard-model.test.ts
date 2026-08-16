@@ -168,9 +168,9 @@ test("weekly flow excludes returns from earlier weeks", () => {
     {
       name: "回收记录.csv",
       text: csv([
-        ["回收记录ID", "回收日期", "分配ID", "发放单ID", "数据线", "回收类型", "本次回收量", "其中完成量", "其中未完成量"],
-        ["R-old", "2026-08-07", "A-old", "D-old", "SFT", "首次回收", 1000, 1000, 0],
-        ["R-now", "2026-08-14", "A-1", "D-1", "SFT", "首次回收", 90, 80, 10],
+        ["回收记录ID", "回收日期", "分配ID", "发放单ID", "数据线", "人员", "回收类型", "本次回收量", "其中完成量", "其中未完成量"],
+        ["R-old", "2026-08-07", "A-old", "D-old", "SFT", "标注员A", "首次回收", 1000, 1000, 0],
+        ["R-now", "2026-08-14", "A-1", "D-1", "SFT", "标注员A", "首次回收", 90, 80, 10],
       ]),
     },
   ]);
@@ -240,8 +240,8 @@ test("cross-line QC assignments are rejected instead of contaminating the plan",
     {
       name: "质检分配.csv",
       text: csv([
-        ["质检分配ID", "质检方案ID", "数据线", "完成量", "通过", "不通过", "存疑", "完成日期"],
-        ["QCA-1", "QC-1", "RL", 10, 10, 0, 0, "2026-08-14"],
+        ["质检分配ID", "质检方案ID", "数据线", "质检人员", "分配量", "完成量", "通过", "不通过", "存疑", "完成日期"],
+        ["QCA-1", "QC-1", "RL", "质检员A", 10, 10, 10, 0, 0, "2026-08-14"],
       ]),
     },
   ]);
@@ -296,9 +296,9 @@ test("first-return metrics exclude rework returns", () => {
     {
       name: "回收记录.csv",
       text: csv([
-        ["回收记录ID", "回收日期", "分配ID", "发放单ID", "数据线", "回收类型", "本次回收量", "其中完成量", "其中未完成量"],
-        ["R-1", "2026-08-14", "A-1", "D-1", "SFT", "首次回收", 80, 80, 0],
-        ["R-2", "2026-08-14", "A-2", "D-R1", "SFT", "返工回收", 30, 30, 0],
+        ["回收记录ID", "回收日期", "分配ID", "发放单ID", "数据线", "人员", "回收类型", "本次回收量", "其中完成量", "其中未完成量"],
+        ["R-1", "2026-08-14", "A-1", "D-1", "SFT", "标注员A", "首次回收", 80, 80, 0],
+        ["R-2", "2026-08-14", "A-2", "D-R1", "SFT", "标注员B", "返工回收", 30, 30, 0],
       ]),
     },
   ]);
@@ -307,7 +307,7 @@ test("first-return metrics exclude rework returns", () => {
   assert.equal(model.metrics.SFT.completed, 80);
 });
 
-test("weekly QC metrics exclude plans from earlier weeks", () => {
+test("weekly QC flow stays separate from older open backlog", () => {
   const model = buildImportedDashboardModel([
     {
       name: "每日库存.csv",
@@ -327,16 +327,18 @@ test("weekly QC metrics exclude plans from earlier weeks", () => {
     {
       name: "质检分配.csv",
       text: csv([
-        ["质检分配ID", "质检方案ID", "数据线", "完成量", "通过", "不通过", "存疑", "完成日期"],
-        ["QCA-old", "QC-old", "SFT", 200, 200, 0, 0, "2026-08-14"],
-        ["QCA-now", "QC-now", "SFT", 10, 9, 1, 0, "2026-08-14"],
+        ["质检分配ID", "质检方案ID", "数据线", "质检人员", "分配量", "完成量", "通过", "不通过", "存疑", "完成日期"],
+        ["QCA-old", "QC-old", "SFT", "质检员A", 200, 0, 0, 0, 0, "2026-08-14"],
+        ["QCA-now", "QC-now", "SFT", "质检员A", 10, 10, 9, 1, 0, "2026-08-14"],
       ]),
     },
   ]);
 
-  assert.equal(model.metrics.SFT.qcSelected, 10);
+  assert.equal(model.metrics.SFT.qcSelected, 210);
   assert.equal(model.metrics.SFT.qcCompleted, 10);
+  assert.equal(model.metrics.SFT.qcPending, 200);
   assert.equal(model.metrics.SFT.qcPassRate, 90);
+  assert.deepEqual(model.weeklyQuality.SFT, { selected: 10, completed: 10 });
 });
 
 test("invalid numeric values are skipped with a warning", () => {
@@ -371,15 +373,15 @@ test("mismatched return relationships cannot close a follow-up", () => {
     {
       name: "回收记录.csv",
       text: csv([
-        ["回收记录ID", "回收日期", "分配ID", "发放单ID", "数据线", "回收类型", "本次回收量", "其中完成量", "其中未完成量"],
-        ["R-1", "2026-08-14", "A-1", "D-1", "RL", "首次回收", 100, 100, 0],
+        ["回收记录ID", "回收日期", "分配ID", "发放单ID", "数据线", "人员", "回收类型", "本次回收量", "其中完成量", "其中未完成量"],
+        ["R-1", "2026-08-14", "A-1", "D-1", "RL", "标注员A", "首次回收", 100, 100, 0],
       ]),
     },
   ]);
 
   assert.equal(model.followups?.[0]?.id, "A-1");
   assert.equal(model.followups?.[0]?.returned, 0);
-  assert.ok(model.report.warnings.some((warning) => warning.includes("数据线或发放单不一致")));
+  assert.ok(model.report.warnings.some((warning) => warning.includes("数据线、发放单或人员不一致")));
 });
 
 test("invalid QC completion dates are excluded with a warning", () => {
@@ -401,12 +403,43 @@ test("invalid QC completion dates are excluded with a warning", () => {
     {
       name: "质检分配.csv",
       text: csv([
-        ["质检分配ID", "质检方案ID", "数据线", "完成量", "通过", "不通过", "存疑", "完成日期"],
-        ["QCA-1", "QC-1", "SFT", 10, 10, 0, 0, "2026-19-10"],
+        ["质检分配ID", "质检方案ID", "数据线", "质检人员", "分配量", "完成量", "通过", "不通过", "存疑", "完成日期"],
+        ["QCA-1", "QC-1", "SFT", "质检员A", 10, 10, 10, 0, 0, "2026-19-10"],
       ]),
     },
   ]);
 
   assert.equal(model.metrics.SFT.qcCompleted, 0);
+  assert.equal(model.people?.find((person) => person.name === "质检员A")?.completed, 0);
   assert.ok(model.report.warnings.some((warning) => warning.includes("无效完成日期")));
+});
+
+test("returns above the assigned amount cannot close a follow-up", () => {
+  const model = buildImportedDashboardModel([
+    {
+      name: "每日库存.csv",
+      text: csv([
+        ["日期", "数据线", "期末库存", "预计支撑天数"],
+        ["2026-08-14", "SFT", 900, 9],
+      ]),
+    },
+    {
+      name: "标注分配.csv",
+      text: csv([
+        ["分配ID", "发放单ID", "数据线", "人员", "分配任务量", "开始日期"],
+        ["A-1", "D-1", "SFT", "标注员A", 100, "2026-08-14"],
+      ]),
+    },
+    {
+      name: "回收记录.csv",
+      text: csv([
+        ["回收记录ID", "回收日期", "分配ID", "发放单ID", "数据线", "人员", "回收类型", "本次回收量", "其中完成量", "其中未完成量"],
+        ["R-1", "2026-08-14", "A-1", "D-1", "SFT", "标注员A", "首次回收", 200, 200, 0],
+      ]),
+    },
+  ]);
+
+  assert.equal(model.metrics.SFT.returned, undefined);
+  assert.equal(model.followups?.[0]?.returned, 0);
+  assert.ok(model.report.warnings.some((warning) => warning.includes("累计回收量超过分配任务量")));
 });
