@@ -25,11 +25,11 @@ export const lineMetrics: Record<DataLine, LineMetric> = {
 };
 
 export const workdayTrend = [
-  { date: "08-10", sftInventory: 9000, rlInventory: 4500, issued: 1500, returned: 1290, completed: 1183 },
-  { date: "08-11", sftInventory: 7950, rlInventory: 3850, issued: 1700, returned: 1515, completed: 1400 },
-  { date: "08-12", sftInventory: 13000, rlInventory: 3150, issued: 1650, returned: 1478, completed: 1350 },
-  { date: "08-13", sftInventory: 11800, rlInventory: 2550, issued: 1800, returned: 1574, completed: 1470 },
-  { date: "08-14", sftInventory: 10500, rlInventory: 5300, issued: 2050, returned: 1798, completed: 1740 },
+  { date: "08-10", sftInventory: 9000, rlInventory: 4500, issued: 1500, returned: 1290, completed: 1183, byLine: { SFT: { issued: 1000, returned: 800, completed: 750 }, RL: { issued: 500, returned: 490, completed: 433 } } },
+  { date: "08-11", sftInventory: 7950, rlInventory: 3850, issued: 1700, returned: 1515, completed: 1400, byLine: { SFT: { issued: 1050, returned: 950, completed: 880 }, RL: { issued: 650, returned: 565, completed: 520 } } },
+  { date: "08-12", sftInventory: 13000, rlInventory: 3150, issued: 1650, returned: 1478, completed: 1350, byLine: { SFT: { issued: 950, returned: 900, completed: 820 }, RL: { issued: 700, returned: 578, completed: 530 } } },
+  { date: "08-13", sftInventory: 11800, rlInventory: 2550, issued: 1800, returned: 1574, completed: 1470, byLine: { SFT: { issued: 1200, returned: 1030, completed: 960 }, RL: { issued: 600, returned: 544, completed: 510 } } },
+  { date: "08-14", sftInventory: 10500, rlInventory: 5300, issued: 2050, returned: 1798, completed: 1740, byLine: { SFT: { issued: 1300, returned: 1150, completed: 1100 }, RL: { issued: 750, returned: 648, completed: 640 } } },
 ];
 
 export const qualityPools = [
