@@ -18,8 +18,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
-  const title = "SFT / RL 运营分析台";
-  const description = "从数据发放、回收到分层质检的运营分析与异常处置台。";
+  const title = "SFT / RL 任务运营台";
+  const description = "将计划、执行、回收、质检与资源整合为可追溯的运营控制台。";
 
   return {
     title,

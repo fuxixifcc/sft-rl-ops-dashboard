@@ -27,12 +27,12 @@ import {
 } from "./dashboard-model";
 
 const navItems: { key: ViewKey; label: string; kicker: string }[] = [
-  { key: "overview", label: "运营总览", kicker: "总览" },
-  { key: "returns", label: "回收分析", kicker: "流转" },
-  { key: "quality", label: "质检分析", kicker: "质量" },
-  { key: "people", label: "人员负载", kicker: "人效" },
-  { key: "inventory", label: "库存预测", kicker: "供给" },
-  { key: "versions", label: "规则版本", kicker: "版本" },
+  { key: "overview", label: "经营总览", kicker: "CONTROL" },
+  { key: "returns", label: "执行回收", kicker: "EXECUTE" },
+  { key: "quality", label: "今日质检", kicker: "QUALITY" },
+  { key: "people", label: "人力资源", kicker: "RESOURCE" },
+  { key: "inventory", label: "任务供给", kicker: "SUPPLY" },
+  { key: "versions", label: "周期与批次", kicker: "CYCLE" },
 ];
 
 type DrawerContent = { title: string; eyebrow: string; body: string; metric?: string } | null;
@@ -217,26 +217,26 @@ export default function Home() {
   return (
     <main className="app-shell">
       <aside className="sidebar" ref={sidebarRef}>
-        <div className="brand"><span className="brand-mark">OP</span><div><strong>运营分析台</strong><small>SFT / RL</small></div></div>
+        <div className="brand"><span className="brand-mark">01</span><div><strong>任务运营台</strong><small>MULTI-SITE CONTROL</small></div></div>
         <nav aria-label="主导航">
           {navItems.map((item) => <button className={view === item.key ? "active" : ""} key={item.key} onClick={() => setView(item.key)} type="button"><small>{item.kicker}</small><span>{item.label}</span></button>)}
         </nav>
-        <div className="sidebar-status"><span /><div><strong>{imported ? "本地数据已载入" : "虚构演示数据"}</strong><small>{imported ? `${imported.report.rows} 条记录，仅保存在内存` : "不包含任何公司真实数据"}</small></div></div>
+        <div className="sidebar-status"><span /><div><strong>{imported ? "数据链路已接入" : "演示运行中"}</strong><small>{imported ? `${imported.report.rows} 条记录 · 本地内存` : "SFT / RL 运营闭环"}</small></div></div>
       </aside>
 
       <section className="workspace" ref={workspaceRef}>
         <header className="topbar">
-          <div><p className="eyebrow">OPERATIONS INTELLIGENCE</p><h1>{navItems.find((item) => item.key === view)?.label}</h1><p className="subtitle">把发放、回收、双标、质检和库存放进同一条可追溯的运营链路。</p></div>
+          <div><p className="eyebrow">PROJECT P-26-081 · OPERATION CONTROL</p><h1>{navItems.find((item) => item.key === view)?.label}</h1><p className="subtitle">计划、执行、回收、资源与质检，统一回到可追溯的任务闭环。</p></div>
           <div className="header-actions">
-            <div className="period-switch"><span>近 5 个工作日</span></div>
+            <div className="period-switch"><span>当前周期 · 近 5 个工作日</span></div>
             <input ref={fileInput} hidden multiple accept=".csv,text/csv" type="file" onChange={(event) => { void handleCsvImport(event.target.files); event.target.value = ""; }} />
-            <button className="import-button" type="button" onClick={() => fileInput.current?.click()}>导入 CSV 包</button>
+            <button className="import-button" type="button" onClick={() => fileInput.current?.click()}>接入数据包</button>
           </div>
         </header>
 
         <section className="control-deck">
           <div className="line-switch"><button className={line === "ALL" ? "active" : ""} onClick={() => setLine("ALL")} type="button">全部</button><button className={line === "SFT" ? "active sft" : ""} onClick={() => setLine("SFT")} type="button">SFT</button><button className={line === "RL" ? "active rl" : ""} onClick={() => setLine("RL")} type="button">RL</button></div>
-          <span>截至 {reportDate}</span><span>比例：按数量加权</span><span>库存：仅首次发放扣减</span>
+          <span>快照 {reportDate}</span><span>计划 / 实际按数量校准</span><span>仅首次发放扣减供给</span>
           {imported && <button className={`import-status ${imported.report.warnings.length ? "warn" : "ok"}`} type="button" onClick={() => openAlert(3)}>{imported.report.tables.length} 张表 · {imported.report.warnings.length ? `${imported.report.warnings.length} 项提醒` : "校验通过"}</button>}
           {imported && <button className="reset-data" type="button" onClick={() => { setImported(null); setDrawer(null); }}>恢复演示数据</button>}
         </section>
