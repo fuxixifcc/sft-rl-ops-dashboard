@@ -39,7 +39,7 @@ type LedgerColumn = { id: string; label: string; kind: "batch" | "taskType" | "r
 const manualTaskStorageKey = "sft-rl-manual-tasks-v2";
 const ledgerColumnStorageKey = "sft-rl-ledger-columns-v1";
 const taskTypeOptions = ["RL标注", "RL质检", "RL返修", "SFT标注", "SFT质检", "SFT返修"];
-const ruleVersionOptions = ["RL 就版本", "RL v1.0"];
+const ruleVersionOptions = ["RL旧版", "RLv1.0", "SFT旧版", "SFTv3.0"];
 const defaultLedgerColumns: LedgerColumn[] = [
   { id: "batch", label: "日期范围", kind: "batch" },
   { id: "taskType", label: "任务类型", kind: "taskType" },
