@@ -404,10 +404,10 @@ function ManualTaskLedger({ tasks, onAdd, onChange, onCustomChange, onDelete }: 
     setDraggedColumn(null);
   };
 
-  const columnGrid = { gridTemplateColumns: columns.map((column) => column.kind === "batch" ? "220px" : column.kind === "headcount" ? "72px" : "112px").join(" ") };
+  const columnGrid = { gridTemplateColumns: `${columns.map((column) => column.kind === "batch" ? "220px" : column.kind === "headcount" ? "72px" : "112px").join(" ")} 32px` };
 
   const renderCell = (task: ManualTask, column: LedgerColumn) => {
-    if (column.kind === "batch") return <div className="batch-fields"><div><DateField label="开始日期" value={task.batchStart} onChange={(value) => onChange(task.id, "batchStart", value)} /><i>—</i><DateField label="结束日期" value={task.batchEnd} onChange={(value) => onChange(task.id, "batchEnd", value)} /></div><button className="ledger-delete" type="button" aria-label="删除任务" onClick={() => onDelete(task.id)}>删除此条</button></div>;
+    if (column.kind === "batch") return <div className="batch-fields"><div><DateField label="开始日期" value={task.batchStart} onChange={(value) => onChange(task.id, "batchStart", value)} /><i>—</i><DateField label="结束日期" value={task.batchEnd} onChange={(value) => onChange(task.id, "batchEnd", value)} /></div></div>;
     if (column.kind === "taskType") return <select aria-label="任务类型" value={task.taskType} onChange={(event) => onChange(task.id, "taskType", event.target.value)}>{taskTypeOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
     if (column.kind === "headcount") return <input aria-label="人力" value={task.headcount} onChange={(event) => onChange(task.id, "headcount", event.target.value)} inputMode="numeric" placeholder="人数" />;
     if (column.kind === "startTime") return <DateField label="开始时间" value={task.startTime} onChange={(value) => onChange(task.id, "startTime", value)} />;
@@ -421,8 +421,8 @@ function ManualTaskLedger({ tasks, onAdd, onChange, onCustomChange, onDelete }: 
     <SectionTitle eyebrow="本地任务台账" title="手工登记与编辑任务" note="拖动表头可调整整列位置；新增格子默认在回收状态后面。" extra={<div className="ledger-actions"><button className="ledger-category" type="button" onClick={() => setColumnPanelOpen((open) => !open)}>＋ 增加类目</button><button className="ledger-add" type="button" onClick={onAdd}>＋ 新增一条</button></div>} />
     {columnPanelOpen && <div className="category-editor"><label>新格子名称<input value={columnDraft} onChange={(event) => setColumnDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addColumn(); } }} placeholder="例如：验收人" /></label><button type="button" onClick={addColumn} disabled={!columnDraft.trim()}>添加到回收状态后</button><button className="category-cancel" type="button" onClick={() => { setColumnPanelOpen(false); setColumnDraft(""); }}>取消</button></div>}
     <div className="task-table">
-      <div className="task-row task-header" style={columnGrid}>{columns.map((column) => <button className={`column-handle ${draggedColumn === column.id ? "dragging" : ""}`} key={column.id} type="button" draggable onDragStart={(event) => { setDraggedColumn(column.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => setDraggedColumn(null)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveColumn(column.id)} title="拖动调整位置">⋮⋮ {column.label}</button>)}</div>
-      {tasks.map((task) => <div className="task-row" key={task.id} style={columnGrid}>{columns.map((column) => <div className="ledger-cell" key={column.id}>{renderCell(task, column)}</div>)}</div>)}
+      <div className="task-row task-header" style={columnGrid}>{columns.map((column) => <button className={`column-handle ${draggedColumn === column.id ? "dragging" : ""}`} key={column.id} type="button" draggable onDragStart={(event) => { setDraggedColumn(column.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => setDraggedColumn(null)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveColumn(column.id)} title="拖动调整位置">⋮⋮ {column.label}</button>)}<span aria-label="操作" /></div>
+      {tasks.map((task) => <div className="task-row" key={task.id} style={columnGrid}>{columns.map((column) => <div className="ledger-cell" key={column.id}>{renderCell(task, column)}</div>)}<button className="ledger-delete" type="button" aria-label="删除任务" title="删除此条" onClick={() => onDelete(task.id)}>🗑</button></div>)}
       {!tasks.length && <div className="ledger-empty">当前没有任何数据。点击“新增一条”开始登记。</div>}
     </div>
   </article>;
