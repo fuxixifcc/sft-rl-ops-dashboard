@@ -34,8 +34,8 @@ const navItems: { key: ViewKey; label: string; kicker: string }[] = [
 ];
 
 type DrawerContent = { title: string; eyebrow: string; body: string; metric?: string } | null;
-type ManualTask = { id: string; batch: string; batchStart: string; batchEnd: string; taskType: string; ruleVersion: string; headcount: string; startTime: string; returnTime: string; issueStatus: string; returnStatus: string; customFields?: Record<string, string> };
-type LedgerColumn = { id: string; label: string; kind: "batch" | "taskType" | "ruleVersion" | "headcount" | "startTime" | "returnTime" | "issueStatus" | "returnStatus" | "custom" };
+type ManualTask = { id: string; batch: string; batchStart: string; batchEnd: string; taskType: string; ruleVersion: string; headcount: string; subjectCount: string; doubleLabelIncrement: string; startTime: string; returnTime: string; issueStatus: string; returnStatus: string; customFields?: Record<string, string> };
+type LedgerColumn = { id: string; label: string; kind: "batch" | "taskType" | "ruleVersion" | "headcount" | "subjectCount" | "doubleLabelIncrement" | "startTime" | "returnTime" | "issueStatus" | "returnStatus" | "custom" };
 const manualTaskStorageKey = "sft-rl-manual-tasks-v2";
 const ledgerColumnStorageKey = "sft-rl-ledger-columns-v1";
 const taskTypeOptions = ["RL标注", "RL质检", "RL返修", "SFT标注", "SFT质检", "SFT返修"];
@@ -45,6 +45,8 @@ const defaultLedgerColumns: LedgerColumn[] = [
   { id: "taskType", label: "任务类型", kind: "taskType" },
   { id: "ruleVersion", label: "规则版本", kind: "ruleVersion" },
   { id: "headcount", label: "人力", kind: "headcount" },
+  { id: "subjectCount", label: "题目数", kind: "subjectCount" },
+  { id: "doubleLabelIncrement", label: "双标增量", kind: "doubleLabelIncrement" },
   { id: "startTime", label: "开始时间", kind: "startTime" },
   { id: "returnTime", label: "回收时间", kind: "returnTime" },
   { id: "issueStatus", label: "下发状态", kind: "issueStatus" },
@@ -291,7 +293,7 @@ export default function Home() {
   }
 
   function addManualTask() {
-    setManualTasks((tasks) => [{ id: crypto.randomUUID(), batch: "", batchStart: "", batchEnd: "", taskType: "SFT标注", ruleVersion: "", headcount: "", startTime: "", returnTime: "", issueStatus: "待下发", returnStatus: "未回收" }, ...tasks]);
+    setManualTasks((tasks) => [{ id: crypto.randomUUID(), batch: "", batchStart: "", batchEnd: "", taskType: "SFT标注", ruleVersion: "", headcount: "", subjectCount: "", doubleLabelIncrement: "", startTime: "", returnTime: "", issueStatus: "待下发", returnStatus: "未回收" }, ...tasks]);
   }
 
   function updateManualTask(id: string, field: Exclude<keyof ManualTask, "id" | "customFields">, value: string) {
@@ -423,13 +425,15 @@ function ManualTaskLedger({ tasks, onAdd, onChange, onCustomChange, onDelete }: 
     setColumns((current) => current.filter((column) => column.id !== id));
   };
 
-  const columnGrid = { gridTemplateColumns: `${columns.map((column) => column.kind === "batch" ? "310px" : column.kind === "headcount" ? "72px" : "112px").join(" ")} 32px` };
+  const columnGrid = { gridTemplateColumns: `${columns.map((column) => column.kind === "batch" ? "310px" : ["headcount", "subjectCount", "doubleLabelIncrement"].includes(column.kind) ? "72px" : "112px").join(" ")} 32px` };
 
   const renderCell = (task: ManualTask, column: LedgerColumn) => {
     if (column.kind === "batch") return <div className="batch-fields"><div><DateField label="开始日期" value={task.batchStart} onChange={(value) => onChange(task.id, "batchStart", value)} /><i>—</i><DateField label="结束日期" value={task.batchEnd} onChange={(value) => onChange(task.id, "batchEnd", value)} /></div></div>;
     if (column.kind === "taskType") return <select aria-label="任务类型" value={task.taskType} onChange={(event) => onChange(task.id, "taskType", event.target.value)}>{taskTypeOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
     if (column.kind === "ruleVersion") return <select aria-label="规则版本" value={task.ruleVersion ?? ""} onChange={(event) => onChange(task.id, "ruleVersion", event.target.value)}><option value="">选择版本</option>{ruleVersionOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
     if (column.kind === "headcount") return <input aria-label="人力" value={task.headcount} onChange={(event) => onChange(task.id, "headcount", event.target.value)} inputMode="numeric" placeholder="人数" />;
+    if (column.kind === "subjectCount") return <input aria-label="题目数" value={task.subjectCount ?? ""} onChange={(event) => onChange(task.id, "subjectCount", event.target.value)} inputMode="numeric" placeholder="题目数" />;
+    if (column.kind === "doubleLabelIncrement") return <input aria-label="双标增量" value={task.doubleLabelIncrement ?? ""} onChange={(event) => onChange(task.id, "doubleLabelIncrement", event.target.value)} inputMode="numeric" placeholder="增量" />;
     if (column.kind === "startTime") return <DateField label="开始时间" value={task.startTime} onChange={(value) => onChange(task.id, "startTime", value)} />;
     if (column.kind === "returnTime") return <DateField label="回收时间" value={task.returnTime} onChange={(value) => onChange(task.id, "returnTime", value)} />;
     if (column.kind === "issueStatus") return <select aria-label="下发状态" value={task.issueStatus} onChange={(event) => onChange(task.id, "issueStatus", event.target.value)}>{issueStatusOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
