@@ -297,9 +297,8 @@ export default function Home() {
     setManualTasks((tasks) => [{ id: crypto.randomUUID(), batch: "", batchStart: "", batchEnd: "", taskType: "SFT标注", headcount: "", startTime: "", returnTime: "", issueStatus: "待下发", returnStatus: "未回收" }, ...tasks]);
   }
 
-  function addCategory() {
-    const category = window.prompt("输入新类目名称");
-    const normalized = category?.trim();
+  function addCategory(category: string) {
+    const normalized = category.trim();
     if (!normalized) return;
     if ([...defaultCategories, ...customCategories].includes(normalized)) {
       setToast("该类目已存在");
@@ -369,9 +368,18 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
   return <span className="date-field"><input ref={inputRef} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} type="date" /><button type="button" aria-label={`选择${label}`} title="选择日期" onClick={openCalendar}>⌄</button></span>;
 }
 
-function ManualTaskLedger({ tasks, categories, onAdd, onAddCategory, onChange, onDelete }: { tasks: ManualTask[]; categories: string[]; onAdd: () => void; onAddCategory: () => void; onChange: (id: string, field: Exclude<keyof ManualTask, "id">, value: string) => void; onDelete: (id: string) => void }) {
+function ManualTaskLedger({ tasks, categories, onAdd, onAddCategory, onChange, onDelete }: { tasks: ManualTask[]; categories: string[]; onAdd: () => void; onAddCategory: (category: string) => void; onChange: (id: string, field: Exclude<keyof ManualTask, "id">, value: string) => void; onDelete: (id: string) => void }) {
+  const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
+  const [categoryDraft, setCategoryDraft] = useState("");
+  const submitCategory = () => {
+    if (!categoryDraft.trim()) return;
+    onAddCategory(categoryDraft);
+    setCategoryDraft("");
+    setCategoryPanelOpen(false);
+  };
   return <article className="panel task-ledger">
-    <SectionTitle eyebrow="本地任务台账" title="手工登记与编辑任务" note="点击日期框右侧日历按钮选择日期；类目可自行扩展，仅保存在当前浏览器。" extra={<div className="ledger-actions"><button className="ledger-category" type="button" onClick={onAddCategory}>＋ 增加类目</button><button className="ledger-add" type="button" onClick={onAdd}>＋ 新增一条</button></div>} />
+    <SectionTitle eyebrow="本地任务台账" title="手工登记与编辑任务" note="点击日期框右侧日历按钮选择日期；类目可自行扩展，仅保存在当前浏览器。" extra={<div className="ledger-actions"><button className="ledger-category" type="button" onClick={() => setCategoryPanelOpen((open) => !open)}>＋ 增加类目</button><button className="ledger-add" type="button" onClick={onAdd}>＋ 新增一条</button></div>} />
+    {categoryPanelOpen && <div className="category-editor"><label>新类目<input value={categoryDraft} onChange={(event) => setCategoryDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); submitCategory(); } }} placeholder="例如：SFT复核" /></label><button type="button" onClick={submitCategory} disabled={!categoryDraft.trim()}>添加</button><button className="category-cancel" type="button" onClick={() => { setCategoryPanelOpen(false); setCategoryDraft(""); }}>取消</button><div className="category-list" aria-label="现有类目">{categories.map((category) => <span key={category}>{category}</span>)}</div></div>}
     <div className="task-table">
       <div className="task-row task-header"><span>批次 / 日期范围</span><span>类目</span><span>人力</span><span>开始时间</span><span>回收时间</span><span>下发状态</span><span>回收状态</span></div>
       {tasks.map((task) => <div className="task-row" key={task.id}>
