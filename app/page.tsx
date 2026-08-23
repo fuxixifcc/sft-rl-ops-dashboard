@@ -34,9 +34,10 @@ const navItems: { key: ViewKey; label: string; kicker: string }[] = [
 ];
 
 type DrawerContent = { title: string; eyebrow: string; body: string; metric?: string } | null;
-type ManualTask = { id: string; batch: string; batchStart: string; batchEnd: string; taskName: string; taskType: string; headcount: string; startTime: string; returnTime: string; issueStatus: string; returnStatus: string };
+type ManualTask = { id: string; batch: string; batchStart: string; batchEnd: string; taskType: string; headcount: string; startTime: string; returnTime: string; issueStatus: string; returnStatus: string };
 const manualTaskStorageKey = "sft-rl-manual-tasks-v2";
-const taskTypeOptions = ["RL标注", "RL质检", "RL返修", "SFT标注", "SFT质检", "SFT返修"];
+const categoryStorageKey = "sft-rl-task-categories-v1";
+const defaultCategories = ["RL标注", "RL质检", "RL返修", "SFT标注", "SFT质检", "SFT返修"];
 const issueStatusOptions = ["已下发", "待下发"];
 const returnStatusOptions = ["未回收", "不完全回收", "完全回收"];
 const blankMetrics = {
@@ -102,6 +103,8 @@ export default function Home() {
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [manualTasks, setManualTasks] = useState<ManualTask[]>([]);
   const [manualTasksReady, setManualTasksReady] = useState(false);
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [categoriesReady, setCategoriesReady] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
@@ -166,6 +169,23 @@ export default function Home() {
     if (!manualTasksReady) return;
     window.localStorage.setItem(manualTaskStorageKey, JSON.stringify(manualTasks));
   }, [manualTasks, manualTasksReady]);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(categoryStorageKey);
+      const parsed = saved ? JSON.parse(saved) as string[] : [];
+      queueMicrotask(() => setCustomCategories(parsed.filter((item) => typeof item === "string" && item.trim())));
+    } catch {
+      // Keep the default category list when a saved draft is malformed.
+    } finally {
+      queueMicrotask(() => setCategoriesReady(true));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!categoriesReady) return;
+    window.localStorage.setItem(categoryStorageKey, JSON.stringify(customCategories));
+  }, [customCategories, categoriesReady]);
 
   const activeMetrics = useMemo(() => imported ? mergeImportedMetrics(imported.metrics) : blankMetrics, [imported]);
   const activeTrend = useMemo<ImportedTrendPoint[]>(() => {
@@ -274,7 +294,19 @@ export default function Home() {
   }
 
   function addManualTask() {
-    setManualTasks((tasks) => [{ id: crypto.randomUUID(), batch: "", batchStart: "", batchEnd: "", taskName: "", taskType: "SFT标注", headcount: "", startTime: "", returnTime: "", issueStatus: "待下发", returnStatus: "不完全回收" }, ...tasks]);
+    setManualTasks((tasks) => [{ id: crypto.randomUUID(), batch: "", batchStart: "", batchEnd: "", taskType: "SFT标注", headcount: "", startTime: "", returnTime: "", issueStatus: "待下发", returnStatus: "未回收" }, ...tasks]);
+  }
+
+  function addCategory() {
+    const category = window.prompt("输入新类目名称");
+    const normalized = category?.trim();
+    if (!normalized) return;
+    if ([...defaultCategories, ...customCategories].includes(normalized)) {
+      setToast("该类目已存在");
+      return;
+    }
+    setCustomCategories((categories) => [...categories, normalized]);
+    setToast(`已增加类目：${normalized}`);
   }
 
   function updateManualTask(id: string, field: Exclude<keyof ManualTask, "id">, value: string) {
@@ -315,7 +347,7 @@ export default function Home() {
         {view === "inventory" && <InventoryBoard data={filteredBatches} line={line} metric={metric} trend={activeTrend} forecast={imported?.forecast} setDrawer={setDrawer} />}
         {view === "versions" && <VersionsBoard data={filteredRules} setDrawer={setDrawer} />}
 
-        {view === "overview" && <ManualTaskLedger tasks={manualTasks} onAdd={addManualTask} onChange={updateManualTask} onDelete={(id) => setManualTasks((tasks) => tasks.filter((task) => task.id !== id))} />}
+        {view === "overview" && <ManualTaskLedger tasks={manualTasks} categories={[...defaultCategories, ...customCategories]} onAdd={addManualTask} onAddCategory={addCategory} onChange={updateManualTask} onDelete={(id) => setManualTasks((tasks) => tasks.filter((task) => task.id !== id))} />}
 
         <div className="local-data-note"><b>数据安全：</b> CSV 在浏览器内存中解析，不会上传或保存。正式上线前仍需公司信息安全审批。</div>
       </section>
@@ -337,18 +369,18 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
   return <span className="date-field"><input ref={inputRef} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} type="date" /><button type="button" aria-label={`选择${label}`} title="选择日期" onClick={openCalendar}>⌄</button></span>;
 }
 
-function ManualTaskLedger({ tasks, onAdd, onChange, onDelete }: { tasks: ManualTask[]; onAdd: () => void; onChange: (id: string, field: Exclude<keyof ManualTask, "id">, value: string) => void; onDelete: (id: string) => void }) {
+function ManualTaskLedger({ tasks, categories, onAdd, onAddCategory, onChange, onDelete }: { tasks: ManualTask[]; categories: string[]; onAdd: () => void; onAddCategory: () => void; onChange: (id: string, field: Exclude<keyof ManualTask, "id">, value: string) => void; onDelete: (id: string) => void }) {
   return <article className="panel task-ledger">
-    <SectionTitle eyebrow="本地任务台账" title="手工登记与编辑任务" note="点击日期框右侧日历按钮选择日期；仅保存在当前浏览器，不会自动计入上方 KPI。" extra={<button className="ledger-add" type="button" onClick={onAdd}>＋ 新增一条</button>} />
+    <SectionTitle eyebrow="本地任务台账" title="手工登记与编辑任务" note="点击日期框右侧日历按钮选择日期；类目可自行扩展，仅保存在当前浏览器。" extra={<div className="ledger-actions"><button className="ledger-category" type="button" onClick={onAddCategory}>＋ 增加类目</button><button className="ledger-add" type="button" onClick={onAdd}>＋ 新增一条</button></div>} />
     <div className="task-table">
-      <div className="task-row task-header"><span>批次 / 日期范围</span><span>任务名称</span><span>任务类型</span><span>人力</span><span>开始时间</span><span>回收时间</span><span>下发状态</span><span>回收状态</span></div>
+      <div className="task-row task-header"><span>批次 / 日期范围</span><span>类目</span><span>人力</span><span>开始时间</span><span>回收时间</span><span>下发状态</span><span>回收状态</span></div>
       {tasks.map((task) => <div className="task-row" key={task.id}>
         <div className="batch-fields">
-          <div className="batch-title"><input aria-label="批次" value={task.batch} onChange={(event) => onChange(task.id, "batch", event.target.value)} placeholder="批次编号" /><button className="ledger-delete" type="button" aria-label={`删除 ${task.taskName || "任务"}`} onClick={() => onDelete(task.id)}>删除此条</button></div>
+          <input aria-label="批次" value={task.batch} onChange={(event) => onChange(task.id, "batch", event.target.value)} placeholder="批次编号" />
           <div><DateField label="批次开始日期" value={task.batchStart} onChange={(value) => onChange(task.id, "batchStart", value)} /><i>—</i><DateField label="批次结束日期" value={task.batchEnd} onChange={(value) => onChange(task.id, "batchEnd", value)} /></div>
+          <button className="ledger-delete" type="button" aria-label="删除任务" onClick={() => onDelete(task.id)}>删除此条</button>
         </div>
-        <input aria-label="任务名称" value={task.taskName} onChange={(event) => onChange(task.id, "taskName", event.target.value)} placeholder="例如：偏好对齐标注" />
-        <select aria-label="任务类型" value={task.taskType} onChange={(event) => onChange(task.id, "taskType", event.target.value)}>{taskTypeOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>
+        <select aria-label="类目" value={task.taskType} onChange={(event) => onChange(task.id, "taskType", event.target.value)}>{categories.map((option) => <option key={option} value={option}>{option}</option>)}</select>
         <input aria-label="人力" value={task.headcount} onChange={(event) => onChange(task.id, "headcount", event.target.value)} inputMode="numeric" placeholder="人数" />
         <DateField label="开始时间" value={task.startTime} onChange={(value) => onChange(task.id, "startTime", value)} />
         <DateField label="回收时间" value={task.returnTime} onChange={(value) => onChange(task.id, "returnTime", value)} />
