@@ -49,7 +49,11 @@ const defaultLedgerColumns: LedgerColumn[] = [
   { id: "returnStatus", label: "回收状态", kind: "returnStatus" },
 ];
 const issueStatusOptions = ["已下发", "待下发"];
-const returnStatusOptions = ["未回收", "不完全回收", "完全回收"];
+const returnStatusOptions = [
+  { value: "未回收", label: "未回收" },
+  { value: "不完全回收", label: "不完全回收" },
+  { value: "完全回收", label: "完全回收 ✓" },
+];
 const blankMetrics = {
   SFT: Object.fromEntries(Object.keys(lineMetrics.SFT).map((key) => [key, 0])) as typeof lineMetrics.SFT,
   RL: Object.fromEntries(Object.keys(lineMetrics.RL).map((key) => [key, 0])) as typeof lineMetrics.RL,
@@ -421,7 +425,7 @@ function ManualTaskLedger({ tasks, onAdd, onChange, onCustomChange, onDelete }: 
     if (column.kind === "startTime") return <DateField label="开始时间" value={task.startTime} onChange={(value) => onChange(task.id, "startTime", value)} />;
     if (column.kind === "returnTime") return <DateField label="回收时间" value={task.returnTime} onChange={(value) => onChange(task.id, "returnTime", value)} />;
     if (column.kind === "issueStatus") return <select aria-label="下发状态" value={task.issueStatus} onChange={(event) => onChange(task.id, "issueStatus", event.target.value)}>{issueStatusOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
-    if (column.kind === "returnStatus") return <select aria-label="回收状态" value={task.returnStatus} onChange={(event) => onChange(task.id, "returnStatus", event.target.value)}>{returnStatusOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
+    if (column.kind === "returnStatus") return <select aria-label="回收状态" value={task.returnStatus} onChange={(event) => onChange(task.id, "returnStatus", event.target.value)}>{returnStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>;
     return <input aria-label={column.label} value={task.customFields?.[column.id] ?? ""} onChange={(event) => onCustomChange(task.id, column.id, event.target.value)} placeholder={column.label} />;
   };
 
