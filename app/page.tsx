@@ -36,6 +36,8 @@ const navItems: { key: ViewKey; label: string; kicker: string }[] = [
 ];
 
 type DrawerContent = { title: string; eyebrow: string; body: string; metric?: string } | null;
+type ManualTask = { id: string; batch: string; batchStart: string; batchEnd: string; taskName: string; taskType: string; headcount: string; startTime: string; returnTime: string; issueStatus: string; returnStatus: string };
+const manualTaskStorageKey = "sft-rl-manual-tasks-v1";
 
 const demoFollowups: ImportedFollowup[] = [
   { id: "ASN-005", person: "标注员A", line: "SFT", assigned: 400, returned: 360, completed: 360, status: "未回收" },
@@ -93,6 +95,8 @@ export default function Home() {
   const [assistantAnswer, setAssistantAnswer] = useState("");
   const [assistantError, setAssistantError] = useState("");
   const [assistantLoading, setAssistantLoading] = useState(false);
+  const [manualTasks, setManualTasks] = useState<ManualTask[]>([]);
+  const [manualTasksReady, setManualTasksReady] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
@@ -134,6 +138,29 @@ export default function Home() {
       previousFocus.current?.focus();
     };
   }, [drawer]);
+
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      const saved = window.localStorage.getItem(manualTaskStorageKey);
+      const parsed = saved ? JSON.parse(saved) as ManualTask[] : [];
+      queueMicrotask(() => {
+        if (!cancelled) setManualTasks(parsed);
+      });
+    } catch {
+      // Keep the workspace usable if a previous local draft is malformed.
+    } finally {
+      queueMicrotask(() => {
+        if (!cancelled) setManualTasksReady(true);
+      });
+    }
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!manualTasksReady) return;
+    window.localStorage.setItem(manualTaskStorageKey, JSON.stringify(manualTasks));
+  }, [manualTasks, manualTasksReady]);
 
   const activeMetrics = useMemo(() => imported ? mergeImportedMetrics(imported.metrics) : lineMetrics, [imported]);
   const activeTrend = useMemo<ImportedTrendPoint[]>(() => {
@@ -241,6 +268,14 @@ export default function Home() {
     }
   }
 
+  function addManualTask() {
+    setManualTasks((tasks) => [{ id: crypto.randomUUID(), batch: "", batchStart: "", batchEnd: "", taskName: "", taskType: "SFT", headcount: "", startTime: "", returnTime: "", issueStatus: "未下发", returnStatus: "未回收" }, ...tasks]);
+  }
+
+  function updateManualTask(id: string, field: Exclude<keyof ManualTask, "id">, value: string) {
+    setManualTasks((tasks) => tasks.map((task) => task.id === id ? { ...task, [field]: value } : task));
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar" ref={sidebarRef}>
@@ -275,6 +310,8 @@ export default function Home() {
         {view === "inventory" && <InventoryBoard data={filteredBatches} line={line} metric={metric} trend={activeTrend} forecast={imported?.forecast} setDrawer={setDrawer} />}
         {view === "versions" && <VersionsBoard data={filteredRules} setDrawer={setDrawer} />}
 
+        {view === "overview" && <ManualTaskLedger tasks={manualTasks} onAdd={addManualTask} onChange={updateManualTask} onDelete={(id) => setManualTasks((tasks) => tasks.filter((task) => task.id !== id))} />}
+
         <div className="local-data-note"><b>数据安全：</b> CSV 在浏览器内存中解析，不会上传或保存。正式上线前仍需公司信息安全审批。</div>
       </section>
 
@@ -284,6 +321,10 @@ export default function Home() {
       {toast && <div className="toast" role="status">✓ {toast}</div>}
     </main>
   );
+}
+
+function ManualTaskLedger({ tasks, onAdd, onChange, onDelete }: { tasks: ManualTask[]; onAdd: () => void; onChange: (id: string, field: Exclude<keyof ManualTask, "id">, value: string) => void; onDelete: (id: string) => void }) {
+  return <article className="panel task-ledger"><SectionTitle eyebrow="本地任务台账" title="手工登记与编辑任务" note="仅保存在当前浏览器；不会自动计入上方 KPI。" extra={<button className="ledger-add" type="button" onClick={onAdd}>＋ 新增一条</button>} /><div className="task-table"><div className="task-row task-header"><span>批次 / 日期范围</span><span>任务名称</span><span>任务类型</span><span>人力</span><span>开始时间</span><span>回收时间</span><span>下发状态</span><span>回收状态</span><span aria-label="操作" /></div>{tasks.map((task) => <div className="task-row" key={task.id}><div className="batch-fields"><input aria-label="批次" value={task.batch} onChange={(event) => onChange(task.id, "batch", event.target.value)} placeholder="批次编号" /><div><input aria-label="批次开始日期" value={task.batchStart} onChange={(event) => onChange(task.id, "batchStart", event.target.value)} type="date" /><i>—</i><input aria-label="批次结束日期" value={task.batchEnd} onChange={(event) => onChange(task.id, "batchEnd", event.target.value)} type="date" /></div></div><input aria-label="任务名称" value={task.taskName} onChange={(event) => onChange(task.id, "taskName", event.target.value)} placeholder="例如：偏好对齐标注" /><input aria-label="任务类型" value={task.taskType} onChange={(event) => onChange(task.id, "taskType", event.target.value)} placeholder="SFT / RL" /><input aria-label="人力" value={task.headcount} onChange={(event) => onChange(task.id, "headcount", event.target.value)} inputMode="numeric" placeholder="人数" /><input aria-label="开始时间" value={task.startTime} onChange={(event) => onChange(task.id, "startTime", event.target.value)} type="date" /><input aria-label="回收时间" value={task.returnTime} onChange={(event) => onChange(task.id, "returnTime", event.target.value)} type="date" /><input aria-label="下发状态" value={task.issueStatus} onChange={(event) => onChange(task.id, "issueStatus", event.target.value)} placeholder="未下发" /><input aria-label="回收状态" value={task.returnStatus} onChange={(event) => onChange(task.id, "returnStatus", event.target.value)} placeholder="未回收" /><button className="ledger-delete" type="button" aria-label={`删除 ${task.taskName || "任务"}`} onClick={() => onDelete(task.id)}>×</button></div>)}{!tasks.length && <div className="ledger-empty">还没有手工任务。点击“新增一条”开始登记。</div>}</div></article>;
 }
 
 function Overview({ metric, weeklyQualityMetric, line, trend, alertsData, setView, openAlert }: { metric: (key: keyof typeof lineMetrics.SFT) => number; weeklyQualityMetric: (key: "selected" | "completed") => number; line: LineFilter; trend: ImportedTrendPoint[]; alertsData: typeof alerts; setView: (view: ViewKey) => void; openAlert: (index: number) => void }) {
