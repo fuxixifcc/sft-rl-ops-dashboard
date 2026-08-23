@@ -88,6 +88,11 @@ export default function Home() {
   const [drawer, setDrawer] = useState<DrawerContent>(null);
   const [imported, setImported] = useState<ImportedDashboardModel | null>(null);
   const [toast, setToast] = useState("");
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantQuestion, setAssistantQuestion] = useState("");
+  const [assistantAnswer, setAssistantAnswer] = useState("");
+  const [assistantError, setAssistantError] = useState("");
+  const [assistantLoading, setAssistantLoading] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
@@ -214,6 +219,28 @@ export default function Home() {
     setDrawer({ eyebrow: alert.level === "high" ? "高优先级" : "运营提醒", title: alert.title, body: alert.detail, metric: alert.action });
   }
 
+  async function askAssistant() {
+    const question = assistantQuestion.trim();
+    if (!question || assistantLoading) return;
+    setAssistantLoading(true);
+    setAssistantError("");
+    setAssistantAnswer("");
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ question, context: { view, line, reportDate, imported: Boolean(imported) } }),
+      });
+      const payload = await response.json() as { answer?: string; error?: string };
+      if (!response.ok || !payload.answer) throw new Error(payload.error || "问答服务暂时不可用。");
+      setAssistantAnswer(payload.answer);
+    } catch (error) {
+      setAssistantError(error instanceof Error ? error.message : "问答服务暂时不可用，请稍后重试。");
+    } finally {
+      setAssistantLoading(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar" ref={sidebarRef}>
@@ -252,6 +279,8 @@ export default function Home() {
       </section>
 
       {drawer && <div className="drawer-backdrop"><button className="drawer-scrim" type="button" aria-label="关闭详情" onClick={() => setDrawer(null)} /><aside ref={drawerRef} className="detail-drawer" aria-modal="true" aria-labelledby="detail-drawer-title" role="dialog"><button className="drawer-close" type="button" aria-label="关闭详情" onClick={() => setDrawer(null)}>×</button><span>{drawer.eyebrow}</span><h2 id="detail-drawer-title">{drawer.title}</h2>{drawer.metric && <strong>{drawer.metric}</strong>}<p>{drawer.body}</p><div className="drawer-steps"><b>建议下一步</b><ol><li>按数据线和作业批次确认来源</li><li>下钻到发放单或质检方案</li><li>记录处理人、截止时间和关闭结果</li></ol></div></aside></div>}
+      <button className="assistant-fab" type="button" aria-expanded={assistantOpen} aria-controls="ops-assistant" onClick={() => setAssistantOpen((open) => !open)}>✦ 运营问答</button>
+      {assistantOpen && <section className="assistant-panel" id="ops-assistant" aria-label="运营问答机器人"><header><div><span>DEEPSEEK · OPS COPILOT</span><strong>问问当前运营状态</strong></div><button type="button" aria-label="关闭运营问答" onClick={() => setAssistantOpen(false)}>×</button></header><p>可询问库存风险、回收积压、质检重点与下一步动作。</p>{assistantAnswer && <div className="assistant-answer">{assistantAnswer}</div>}{assistantError && <div className="assistant-error">{assistantError}</div>}<textarea value={assistantQuestion} onChange={(event) => setAssistantQuestion(event.target.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void askAssistant(); } }} placeholder="例如：当前最需要优先处理的风险是什么？" rows={4} /><footer><small>⌘ / Ctrl + Enter 发送</small><button type="button" disabled={!assistantQuestion.trim() || assistantLoading} onClick={() => { void askAssistant(); }}>{assistantLoading ? "正在分析…" : "发送问题"}</button></footer></section>}
       {toast && <div className="toast" role="status">✓ {toast}</div>}
     </main>
   );
