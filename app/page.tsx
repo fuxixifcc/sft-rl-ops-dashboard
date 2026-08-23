@@ -40,7 +40,7 @@ const manualTaskStorageKey = "sft-rl-manual-tasks-v2";
 const ledgerColumnStorageKey = "sft-rl-ledger-columns-v1";
 const taskTypeOptions = ["RL标注", "RL质检", "RL返修", "SFT标注", "SFT质检", "SFT返修"];
 const defaultLedgerColumns: LedgerColumn[] = [
-  { id: "batch", label: "批次 / 日期范围", kind: "batch" },
+  { id: "batch", label: "日期范围", kind: "batch" },
   { id: "taskType", label: "任务类型", kind: "taskType" },
   { id: "headcount", label: "人力", kind: "headcount" },
   { id: "startTime", label: "开始时间", kind: "startTime" },
@@ -363,7 +363,7 @@ function ManualTaskLedger({ tasks, onAdd, onChange, onCustomChange, onDelete }: 
     try {
       const saved = window.localStorage.getItem(ledgerColumnStorageKey);
       const parsed = saved ? JSON.parse(saved) as LedgerColumn[] : defaultLedgerColumns;
-      const valid = Array.isArray(parsed) && parsed.length ? parsed : defaultLedgerColumns;
+      const valid = Array.isArray(parsed) && parsed.length ? parsed.map((column) => defaultLedgerColumns.find((defaultColumn) => defaultColumn.id === column.id) ?? column) : defaultLedgerColumns;
       queueMicrotask(() => setColumns(valid));
     } catch {
       // Keep the default column set if a saved layout is malformed.
@@ -407,7 +407,7 @@ function ManualTaskLedger({ tasks, onAdd, onChange, onCustomChange, onDelete }: 
   const columnGrid = { gridTemplateColumns: columns.map((column) => column.kind === "batch" ? "220px" : column.kind === "headcount" ? "72px" : "112px").join(" ") };
 
   const renderCell = (task: ManualTask, column: LedgerColumn) => {
-    if (column.kind === "batch") return <div className="batch-fields"><input aria-label="批次" value={task.batch} onChange={(event) => onChange(task.id, "batch", event.target.value)} placeholder="批次编号" /><div><DateField label="批次开始日期" value={task.batchStart} onChange={(value) => onChange(task.id, "batchStart", value)} /><i>—</i><DateField label="批次结束日期" value={task.batchEnd} onChange={(value) => onChange(task.id, "batchEnd", value)} /></div><button className="ledger-delete" type="button" aria-label="删除任务" onClick={() => onDelete(task.id)}>删除此条</button></div>;
+    if (column.kind === "batch") return <div className="batch-fields"><div><DateField label="开始日期" value={task.batchStart} onChange={(value) => onChange(task.id, "batchStart", value)} /><i>—</i><DateField label="结束日期" value={task.batchEnd} onChange={(value) => onChange(task.id, "batchEnd", value)} /></div><button className="ledger-delete" type="button" aria-label="删除任务" onClick={() => onDelete(task.id)}>删除此条</button></div>;
     if (column.kind === "taskType") return <select aria-label="任务类型" value={task.taskType} onChange={(event) => onChange(task.id, "taskType", event.target.value)}>{taskTypeOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
     if (column.kind === "headcount") return <input aria-label="人力" value={task.headcount} onChange={(event) => onChange(task.id, "headcount", event.target.value)} inputMode="numeric" placeholder="人数" />;
     if (column.kind === "startTime") return <DateField label="开始时间" value={task.startTime} onChange={(value) => onChange(task.id, "startTime", value)} />;
