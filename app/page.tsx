@@ -50,7 +50,7 @@ const defaultLedgerColumns: LedgerColumn[] = [
 ];
 const issueStatusOptions = ["已下发", "待下发"];
 const returnStatusOptions = [
-  { value: "未回收", label: "未回收" },
+  { value: "未回收", label: "未回收 ✕" },
   { value: "不完全回收", label: "不完全回收 ⏳" },
   { value: "完全回收", label: "完全回收 ✓" },
 ];
