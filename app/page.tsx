@@ -4,12 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   alerts,
   batches,
-  incompleteReasons,
   lineMetrics,
   people,
   qualityPools,
   ruleVersions,
-  workdayTrend,
   type DataLine,
   type LineFilter,
   type ViewKey,
@@ -37,7 +35,11 @@ const navItems: { key: ViewKey; label: string; kicker: string }[] = [
 
 type DrawerContent = { title: string; eyebrow: string; body: string; metric?: string } | null;
 type ManualTask = { id: string; batch: string; batchStart: string; batchEnd: string; taskName: string; taskType: string; headcount: string; startTime: string; returnTime: string; issueStatus: string; returnStatus: string };
-const manualTaskStorageKey = "sft-rl-manual-tasks-v1";
+const manualTaskStorageKey = "sft-rl-manual-tasks-v2";
+const blankMetrics = {
+  SFT: Object.fromEntries(Object.keys(lineMetrics.SFT).map((key) => [key, 0])) as typeof lineMetrics.SFT,
+  RL: Object.fromEntries(Object.keys(lineMetrics.RL).map((key) => [key, 0])) as typeof lineMetrics.RL,
+};
 
 const demoFollowups: ImportedFollowup[] = [
   { id: "ASN-005", person: "标注员A", line: "SFT", assigned: 400, returned: 360, completed: 360, status: "未回收" },
@@ -162,9 +164,9 @@ export default function Home() {
     window.localStorage.setItem(manualTaskStorageKey, JSON.stringify(manualTasks));
   }, [manualTasks, manualTasksReady]);
 
-  const activeMetrics = useMemo(() => imported ? mergeImportedMetrics(imported.metrics) : lineMetrics, [imported]);
+  const activeMetrics = useMemo(() => imported ? mergeImportedMetrics(imported.metrics) : blankMetrics, [imported]);
   const activeTrend = useMemo<ImportedTrendPoint[]>(() => {
-    const source: ImportedTrendPoint[] = imported ? (imported.workdayTrend ?? []) : workdayTrend;
+    const source: ImportedTrendPoint[] = imported ? (imported.workdayTrend ?? []) : [];
     if (line === "ALL") return source.slice(-5);
     return source
       .filter((day) => {
@@ -174,11 +176,11 @@ export default function Home() {
       .slice(-5)
       .map((day) => ({ ...day, ...(day.byLine?.[line] ?? {}) }));
   }, [imported, line]);
-  const activeQualityPools = useMemo(() => imported ? (imported.qualityPools ?? []) : qualityPools, [imported]);
-  const activeBatches = useMemo(() => imported ? (imported.batches ?? []) : batches, [imported]);
-  const activePeople = useMemo(() => imported ? (imported.people ?? []) : people, [imported]);
-  const activeRules = useMemo(() => imported ? (imported.ruleVersions ?? []) : ruleVersions, [imported]);
-  const reportDate = imported ? (imported.report.reportDate ?? "未识别") : "2026-08-14";
+  const activeQualityPools = useMemo(() => imported?.qualityPools ?? [], [imported]);
+  const activeBatches = useMemo(() => imported?.batches ?? [], [imported]);
+  const activePeople = useMemo(() => imported?.people ?? [], [imported]);
+  const activeRules = useMemo(() => imported?.ruleVersions ?? [], [imported]);
+  const reportDate = imported?.report.reportDate ?? "尚未载入";
 
   const metric = (key: keyof typeof lineMetrics.SFT) => line === "ALL" ? combineLineMetric(key, activeMetrics, imported?.rateWeights) : activeMetrics[line][key];
   const weeklyQualityMetric = (key: "selected" | "completed") => {
@@ -195,7 +197,7 @@ export default function Home() {
   const filteredCohort = useMemo(() => imported ? (imported.returnCohort ?? []).filter((row) => line === "ALL" || row.line === line) : undefined, [imported, line]);
   const filteredFollowups = useMemo(() => (imported ? (imported.followups ?? []) : demoFollowups).filter((row) => line === "ALL" || row.line === line), [imported, line]);
   const filteredReasons = useMemo(() => {
-    if (!imported) return incompleteReasons;
+    if (!imported) return [];
     const totals = new Map<string, number>();
     for (const reason of imported.incompleteReasons ?? []) {
       if (line !== "ALL" && reason.line !== line) continue;
@@ -214,7 +216,7 @@ export default function Home() {
       { id: "inventory-risk", level: "medium", title: `${riskLine} 库存支撑 ${activeMetrics[riskLine].supportDays.toFixed(1)} 天`, detail: "按每日库存最新快照与最近工作日日均消耗计算。", action: "查看库存预测", view: "inventory" as ViewKey },
       { id: "qc-pending", level: "medium", title: `已抽中待质检 ${formatNumber(pending)} 题`, detail: "仅统计已进入质检方案、但截至报表日尚未完成的记录。", action: "查看质检池", view: "quality" as ViewKey },
     ];
-    if (!imported) return operationalAlerts;
+    if (!imported) return [];
     return [...operationalAlerts, { id: "import-audit", level: imported.report.warnings.length ? "medium" : "info", title: imported.report.warnings.length ? `${imported.report.warnings.length} 项数据校验提醒` : "数据包口径校验通过", detail: `已识别 ${imported.report.tables.length} 张表、${imported.report.rows} 条记录。`, action: "查看导入摘要", view: "overview" as ViewKey }];
   }, [activeMetrics, imported, line]);
 
@@ -283,7 +285,7 @@ export default function Home() {
         <nav aria-label="主导航">
           {navItems.map((item) => <button className={view === item.key ? "active" : ""} key={item.key} onClick={() => setView(item.key)} type="button"><small>{item.kicker}</small><span>{item.label}</span></button>)}
         </nav>
-        <div className="sidebar-status"><span /><div><strong>{imported ? "数据链路已接入" : "演示运行中"}</strong><small>{imported ? `${imported.report.rows} 条记录 · 本地内存` : "SFT / RL 运营闭环"}</small></div></div>
+        <div className="sidebar-status"><span /><div><strong>{imported ? "数据链路已接入" : "等待数据接入"}</strong><small>{imported ? `${imported.report.rows} 条记录 · 本地内存` : "导入 CSV 或新增任务开始使用"}</small></div></div>
       </aside>
 
       <section className="workspace" ref={workspaceRef}>
@@ -300,7 +302,7 @@ export default function Home() {
           <div className="line-switch"><button className={line === "ALL" ? "active" : ""} onClick={() => setLine("ALL")} type="button">全部</button><button className={line === "SFT" ? "active sft" : ""} onClick={() => setLine("SFT")} type="button">SFT</button><button className={line === "RL" ? "active rl" : ""} onClick={() => setLine("RL")} type="button">RL</button></div>
           <span>快照 {reportDate}</span><span>计划 / 实际按数量校准</span><span>仅首次发放扣减供给</span>
           {imported && <button className={`import-status ${imported.report.warnings.length ? "warn" : "ok"}`} type="button" onClick={() => openAlert(3)}>{imported.report.tables.length} 张表 · {imported.report.warnings.length ? `${imported.report.warnings.length} 项提醒` : "校验通过"}</button>}
-          {imported && <button className="reset-data" type="button" onClick={() => { setImported(null); setDrawer(null); }}>恢复演示数据</button>}
+          {imported && <button className="reset-data" type="button" onClick={() => { setImported(null); setDrawer(null); }}>清空导入数据</button>}
         </section>
 
         {view === "overview" && <Overview metric={metric} weeklyQualityMetric={weeklyQualityMetric} line={line} trend={activeTrend} alertsData={activeAlerts} setView={setView} openAlert={openAlert} />}
@@ -324,7 +326,7 @@ export default function Home() {
 }
 
 function ManualTaskLedger({ tasks, onAdd, onChange, onDelete }: { tasks: ManualTask[]; onAdd: () => void; onChange: (id: string, field: Exclude<keyof ManualTask, "id">, value: string) => void; onDelete: (id: string) => void }) {
-  return <article className="panel task-ledger"><SectionTitle eyebrow="本地任务台账" title="手工登记与编辑任务" note="仅保存在当前浏览器；不会自动计入上方 KPI。" extra={<button className="ledger-add" type="button" onClick={onAdd}>＋ 新增一条</button>} /><div className="task-table"><div className="task-row task-header"><span>批次 / 日期范围</span><span>任务名称</span><span>任务类型</span><span>人力</span><span>开始时间</span><span>回收时间</span><span>下发状态</span><span>回收状态</span><span aria-label="操作" /></div>{tasks.map((task) => <div className="task-row" key={task.id}><div className="batch-fields"><input aria-label="批次" value={task.batch} onChange={(event) => onChange(task.id, "batch", event.target.value)} placeholder="批次编号" /><div><input aria-label="批次开始日期" value={task.batchStart} onChange={(event) => onChange(task.id, "batchStart", event.target.value)} type="date" /><i>—</i><input aria-label="批次结束日期" value={task.batchEnd} onChange={(event) => onChange(task.id, "batchEnd", event.target.value)} type="date" /></div></div><input aria-label="任务名称" value={task.taskName} onChange={(event) => onChange(task.id, "taskName", event.target.value)} placeholder="例如：偏好对齐标注" /><input aria-label="任务类型" value={task.taskType} onChange={(event) => onChange(task.id, "taskType", event.target.value)} placeholder="SFT / RL" /><input aria-label="人力" value={task.headcount} onChange={(event) => onChange(task.id, "headcount", event.target.value)} inputMode="numeric" placeholder="人数" /><input aria-label="开始时间" value={task.startTime} onChange={(event) => onChange(task.id, "startTime", event.target.value)} type="date" /><input aria-label="回收时间" value={task.returnTime} onChange={(event) => onChange(task.id, "returnTime", event.target.value)} type="date" /><input aria-label="下发状态" value={task.issueStatus} onChange={(event) => onChange(task.id, "issueStatus", event.target.value)} placeholder="未下发" /><input aria-label="回收状态" value={task.returnStatus} onChange={(event) => onChange(task.id, "returnStatus", event.target.value)} placeholder="未回收" /><button className="ledger-delete" type="button" aria-label={`删除 ${task.taskName || "任务"}`} onClick={() => onDelete(task.id)}>×</button></div>)}{!tasks.length && <div className="ledger-empty">还没有手工任务。点击“新增一条”开始登记。</div>}</div></article>;
+  return <article className="panel task-ledger"><SectionTitle eyebrow="本地任务台账" title="手工登记与编辑任务" note="仅保存在当前浏览器；不会自动计入上方 KPI。" extra={<button className="ledger-add" type="button" onClick={onAdd}>＋ 新增一条</button>} /><div className="task-table"><div className="task-row task-header"><span>批次 / 日期范围</span><span>任务名称</span><span>任务类型</span><span>人力</span><span>开始时间</span><span>回收时间</span><span>下发状态</span><span>回收状态</span><span aria-label="操作" /></div>{tasks.map((task) => <div className="task-row" key={task.id}><div className="batch-fields"><input aria-label="批次" value={task.batch} onChange={(event) => onChange(task.id, "batch", event.target.value)} placeholder="批次编号" /><div><input aria-label="批次开始日期" value={task.batchStart} onChange={(event) => onChange(task.id, "batchStart", event.target.value)} type="date" /><i>—</i><input aria-label="批次结束日期" value={task.batchEnd} onChange={(event) => onChange(task.id, "batchEnd", event.target.value)} type="date" /></div></div><input aria-label="任务名称" value={task.taskName} onChange={(event) => onChange(task.id, "taskName", event.target.value)} placeholder="例如：偏好对齐标注" /><input aria-label="任务类型" value={task.taskType} onChange={(event) => onChange(task.id, "taskType", event.target.value)} placeholder="SFT / RL" /><input aria-label="人力" value={task.headcount} onChange={(event) => onChange(task.id, "headcount", event.target.value)} inputMode="numeric" placeholder="人数" /><input aria-label="开始时间" value={task.startTime} onChange={(event) => onChange(task.id, "startTime", event.target.value)} type="date" /><input aria-label="回收时间" value={task.returnTime} onChange={(event) => onChange(task.id, "returnTime", event.target.value)} type="date" /><input aria-label="下发状态" value={task.issueStatus} onChange={(event) => onChange(task.id, "issueStatus", event.target.value)} placeholder="未下发" /><input aria-label="回收状态" value={task.returnStatus} onChange={(event) => onChange(task.id, "returnStatus", event.target.value)} placeholder="未回收" /><button className="ledger-delete" type="button" aria-label={`删除 ${task.taskName || "任务"}`} onClick={() => onDelete(task.id)}>×</button></div>)}{!tasks.length && <div className="ledger-empty">当前没有任何数据。点击“新增一条”开始登记。</div>}</div></article>;
 }
 
 function Overview({ metric, weeklyQualityMetric, line, trend, alertsData, setView, openAlert }: { metric: (key: keyof typeof lineMetrics.SFT) => number; weeklyQualityMetric: (key: "selected" | "completed") => number; line: LineFilter; trend: ImportedTrendPoint[]; alertsData: typeof alerts; setView: (view: ViewKey) => void; openAlert: (index: number) => void }) {
