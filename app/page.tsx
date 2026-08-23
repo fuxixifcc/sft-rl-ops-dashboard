@@ -34,14 +34,16 @@ const navItems: { key: ViewKey; label: string; kicker: string }[] = [
 ];
 
 type DrawerContent = { title: string; eyebrow: string; body: string; metric?: string } | null;
-type ManualTask = { id: string; batch: string; batchStart: string; batchEnd: string; taskType: string; headcount: string; startTime: string; returnTime: string; issueStatus: string; returnStatus: string; customFields?: Record<string, string> };
-type LedgerColumn = { id: string; label: string; kind: "batch" | "taskType" | "headcount" | "startTime" | "returnTime" | "issueStatus" | "returnStatus" | "custom" };
+type ManualTask = { id: string; batch: string; batchStart: string; batchEnd: string; taskType: string; ruleVersion: string; headcount: string; startTime: string; returnTime: string; issueStatus: string; returnStatus: string; customFields?: Record<string, string> };
+type LedgerColumn = { id: string; label: string; kind: "batch" | "taskType" | "ruleVersion" | "headcount" | "startTime" | "returnTime" | "issueStatus" | "returnStatus" | "custom" };
 const manualTaskStorageKey = "sft-rl-manual-tasks-v2";
 const ledgerColumnStorageKey = "sft-rl-ledger-columns-v1";
 const taskTypeOptions = ["RL标注", "RL质检", "RL返修", "SFT标注", "SFT质检", "SFT返修"];
+const ruleVersionOptions = ["RL 就版本", "RL v1.0"];
 const defaultLedgerColumns: LedgerColumn[] = [
   { id: "batch", label: "日期范围", kind: "batch" },
   { id: "taskType", label: "任务类型", kind: "taskType" },
+  { id: "ruleVersion", label: "规则版本", kind: "ruleVersion" },
   { id: "headcount", label: "人力", kind: "headcount" },
   { id: "startTime", label: "开始时间", kind: "startTime" },
   { id: "returnTime", label: "回收时间", kind: "returnTime" },
@@ -289,10 +291,10 @@ export default function Home() {
   }
 
   function addManualTask() {
-    setManualTasks((tasks) => [{ id: crypto.randomUUID(), batch: "", batchStart: "", batchEnd: "", taskType: "SFT标注", headcount: "", startTime: "", returnTime: "", issueStatus: "待下发", returnStatus: "未回收" }, ...tasks]);
+    setManualTasks((tasks) => [{ id: crypto.randomUUID(), batch: "", batchStart: "", batchEnd: "", taskType: "SFT标注", ruleVersion: "", headcount: "", startTime: "", returnTime: "", issueStatus: "待下发", returnStatus: "未回收" }, ...tasks]);
   }
 
-  function updateManualTask(id: string, field: Exclude<keyof ManualTask, "id">, value: string) {
+  function updateManualTask(id: string, field: Exclude<keyof ManualTask, "id" | "customFields">, value: string) {
     setManualTasks((tasks) => tasks.map((task) => task.id === id ? { ...task, [field]: value } : task));
   }
 
@@ -369,7 +371,8 @@ function ManualTaskLedger({ tasks, onAdd, onChange, onCustomChange, onDelete }: 
     try {
       const saved = window.localStorage.getItem(ledgerColumnStorageKey);
       const parsed = saved ? JSON.parse(saved) as LedgerColumn[] : defaultLedgerColumns;
-      const valid = Array.isArray(parsed) && parsed.length ? parsed.map((column) => defaultLedgerColumns.find((defaultColumn) => defaultColumn.id === column.id) ?? column) : defaultLedgerColumns;
+      const normalized = Array.isArray(parsed) && parsed.length ? parsed.map((column) => defaultLedgerColumns.find((defaultColumn) => defaultColumn.id === column.id) ?? column) : defaultLedgerColumns;
+      const valid = [...normalized, ...defaultLedgerColumns.filter((defaultColumn) => !normalized.some((column) => column.id === defaultColumn.id))];
       queueMicrotask(() => setColumns(valid));
     } catch {
       // Keep the default column set if a saved layout is malformed.
@@ -425,6 +428,7 @@ function ManualTaskLedger({ tasks, onAdd, onChange, onCustomChange, onDelete }: 
   const renderCell = (task: ManualTask, column: LedgerColumn) => {
     if (column.kind === "batch") return <div className="batch-fields"><div><DateField label="开始日期" value={task.batchStart} onChange={(value) => onChange(task.id, "batchStart", value)} /><i>—</i><DateField label="结束日期" value={task.batchEnd} onChange={(value) => onChange(task.id, "batchEnd", value)} /></div></div>;
     if (column.kind === "taskType") return <select aria-label="任务类型" value={task.taskType} onChange={(event) => onChange(task.id, "taskType", event.target.value)}>{taskTypeOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
+    if (column.kind === "ruleVersion") return <select aria-label="规则版本" value={task.ruleVersion ?? ""} onChange={(event) => onChange(task.id, "ruleVersion", event.target.value)}><option value="">选择版本</option>{ruleVersionOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
     if (column.kind === "headcount") return <input aria-label="人力" value={task.headcount} onChange={(event) => onChange(task.id, "headcount", event.target.value)} inputMode="numeric" placeholder="人数" />;
     if (column.kind === "startTime") return <DateField label="开始时间" value={task.startTime} onChange={(value) => onChange(task.id, "startTime", value)} />;
     if (column.kind === "returnTime") return <DateField label="回收时间" value={task.returnTime} onChange={(value) => onChange(task.id, "returnTime", value)} />;
