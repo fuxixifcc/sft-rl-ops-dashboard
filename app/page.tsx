@@ -420,7 +420,7 @@ function ManualTaskLedger({ tasks, onAdd, onChange, onCustomChange, onDelete }: 
     setColumns((current) => current.filter((column) => column.id !== id));
   };
 
-  const columnGrid = { gridTemplateColumns: `${columns.map((column) => column.kind === "batch" ? "220px" : column.kind === "headcount" ? "72px" : "112px").join(" ")} 32px` };
+  const columnGrid = { gridTemplateColumns: `${columns.map((column) => column.kind === "batch" ? "310px" : column.kind === "headcount" ? "72px" : "112px").join(" ")} 32px` };
 
   const renderCell = (task: ManualTask, column: LedgerColumn) => {
     if (column.kind === "batch") return <div className="batch-fields"><div><DateField label="开始日期" value={task.batchStart} onChange={(value) => onChange(task.id, "batchStart", value)} /><i>—</i><DateField label="结束日期" value={task.batchEnd} onChange={(value) => onChange(task.id, "batchEnd", value)} /></div></div>;
