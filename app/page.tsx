@@ -34,10 +34,20 @@ const navItems: { key: ViewKey; label: string; kicker: string }[] = [
 ];
 
 type DrawerContent = { title: string; eyebrow: string; body: string; metric?: string } | null;
-type ManualTask = { id: string; batch: string; batchStart: string; batchEnd: string; taskType: string; headcount: string; startTime: string; returnTime: string; issueStatus: string; returnStatus: string };
+type ManualTask = { id: string; batch: string; batchStart: string; batchEnd: string; taskType: string; headcount: string; startTime: string; returnTime: string; issueStatus: string; returnStatus: string; customFields?: Record<string, string> };
+type LedgerColumn = { id: string; label: string; kind: "batch" | "taskType" | "headcount" | "startTime" | "returnTime" | "issueStatus" | "returnStatus" | "custom" };
 const manualTaskStorageKey = "sft-rl-manual-tasks-v2";
-const categoryStorageKey = "sft-rl-task-categories-v1";
-const defaultCategories = ["RL标注", "RL质检", "RL返修", "SFT标注", "SFT质检", "SFT返修"];
+const ledgerColumnStorageKey = "sft-rl-ledger-columns-v1";
+const taskTypeOptions = ["RL标注", "RL质检", "RL返修", "SFT标注", "SFT质检", "SFT返修"];
+const defaultLedgerColumns: LedgerColumn[] = [
+  { id: "batch", label: "批次 / 日期范围", kind: "batch" },
+  { id: "taskType", label: "任务类型", kind: "taskType" },
+  { id: "headcount", label: "人力", kind: "headcount" },
+  { id: "startTime", label: "开始时间", kind: "startTime" },
+  { id: "returnTime", label: "回收时间", kind: "returnTime" },
+  { id: "issueStatus", label: "下发状态", kind: "issueStatus" },
+  { id: "returnStatus", label: "回收状态", kind: "returnStatus" },
+];
 const issueStatusOptions = ["已下发", "待下发"];
 const returnStatusOptions = ["未回收", "不完全回收", "完全回收"];
 const blankMetrics = {
@@ -103,8 +113,6 @@ export default function Home() {
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [manualTasks, setManualTasks] = useState<ManualTask[]>([]);
   const [manualTasksReady, setManualTasksReady] = useState(false);
-  const [customCategories, setCustomCategories] = useState<string[]>([]);
-  const [categoriesReady, setCategoriesReady] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
@@ -169,23 +177,6 @@ export default function Home() {
     if (!manualTasksReady) return;
     window.localStorage.setItem(manualTaskStorageKey, JSON.stringify(manualTasks));
   }, [manualTasks, manualTasksReady]);
-
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(categoryStorageKey);
-      const parsed = saved ? JSON.parse(saved) as string[] : [];
-      queueMicrotask(() => setCustomCategories(parsed.filter((item) => typeof item === "string" && item.trim())));
-    } catch {
-      // Keep the default category list when a saved draft is malformed.
-    } finally {
-      queueMicrotask(() => setCategoriesReady(true));
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!categoriesReady) return;
-    window.localStorage.setItem(categoryStorageKey, JSON.stringify(customCategories));
-  }, [customCategories, categoriesReady]);
 
   const activeMetrics = useMemo(() => imported ? mergeImportedMetrics(imported.metrics) : blankMetrics, [imported]);
   const activeTrend = useMemo<ImportedTrendPoint[]>(() => {
@@ -297,19 +288,12 @@ export default function Home() {
     setManualTasks((tasks) => [{ id: crypto.randomUUID(), batch: "", batchStart: "", batchEnd: "", taskType: "SFT标注", headcount: "", startTime: "", returnTime: "", issueStatus: "待下发", returnStatus: "未回收" }, ...tasks]);
   }
 
-  function addCategory(category: string) {
-    const normalized = category.trim();
-    if (!normalized) return;
-    if ([...defaultCategories, ...customCategories].includes(normalized)) {
-      setToast("该类目已存在");
-      return;
-    }
-    setCustomCategories((categories) => [...categories, normalized]);
-    setToast(`已增加类目：${normalized}`);
-  }
-
   function updateManualTask(id: string, field: Exclude<keyof ManualTask, "id">, value: string) {
     setManualTasks((tasks) => tasks.map((task) => task.id === id ? { ...task, [field]: value } : task));
+  }
+
+  function updateCustomField(id: string, field: string, value: string) {
+    setManualTasks((tasks) => tasks.map((task) => task.id === id ? { ...task, customFields: { ...task.customFields, [field]: value } } : task));
   }
 
   return (
@@ -346,7 +330,7 @@ export default function Home() {
         {view === "inventory" && <InventoryBoard data={filteredBatches} line={line} metric={metric} trend={activeTrend} forecast={imported?.forecast} setDrawer={setDrawer} />}
         {view === "versions" && <VersionsBoard data={filteredRules} setDrawer={setDrawer} />}
 
-        {view === "overview" && <ManualTaskLedger tasks={manualTasks} categories={[...defaultCategories, ...customCategories]} onAdd={addManualTask} onAddCategory={addCategory} onChange={updateManualTask} onDelete={(id) => setManualTasks((tasks) => tasks.filter((task) => task.id !== id))} />}
+        {view === "overview" && <ManualTaskLedger tasks={manualTasks} onAdd={addManualTask} onChange={updateManualTask} onCustomChange={updateCustomField} onDelete={(id) => setManualTasks((tasks) => tasks.filter((task) => task.id !== id))} />}
 
         <div className="local-data-note"><b>数据安全：</b> CSV 在浏览器内存中解析，不会上传或保存。正式上线前仍需公司信息安全审批。</div>
       </section>
@@ -368,33 +352,77 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
   return <span className="date-field"><input ref={inputRef} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} type="date" /><button type="button" aria-label={`选择${label}`} title="选择日期" onClick={openCalendar}>⌄</button></span>;
 }
 
-function ManualTaskLedger({ tasks, categories, onAdd, onAddCategory, onChange, onDelete }: { tasks: ManualTask[]; categories: string[]; onAdd: () => void; onAddCategory: (category: string) => void; onChange: (id: string, field: Exclude<keyof ManualTask, "id">, value: string) => void; onDelete: (id: string) => void }) {
-  const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
-  const [categoryDraft, setCategoryDraft] = useState("");
-  const submitCategory = () => {
-    if (!categoryDraft.trim()) return;
-    onAddCategory(categoryDraft);
-    setCategoryDraft("");
-    setCategoryPanelOpen(false);
+function ManualTaskLedger({ tasks, onAdd, onChange, onCustomChange, onDelete }: { tasks: ManualTask[]; onAdd: () => void; onChange: (id: string, field: Exclude<keyof ManualTask, "id" | "customFields">, value: string) => void; onCustomChange: (id: string, field: string, value: string) => void; onDelete: (id: string) => void }) {
+  const [columns, setColumns] = useState<LedgerColumn[]>(defaultLedgerColumns);
+  const [columnsReady, setColumnsReady] = useState(false);
+  const [columnPanelOpen, setColumnPanelOpen] = useState(false);
+  const [columnDraft, setColumnDraft] = useState("");
+  const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(ledgerColumnStorageKey);
+      const parsed = saved ? JSON.parse(saved) as LedgerColumn[] : defaultLedgerColumns;
+      const valid = Array.isArray(parsed) && parsed.length ? parsed : defaultLedgerColumns;
+      queueMicrotask(() => setColumns(valid));
+    } catch {
+      // Keep the default column set if a saved layout is malformed.
+    } finally {
+      queueMicrotask(() => setColumnsReady(true));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!columnsReady) return;
+    window.localStorage.setItem(ledgerColumnStorageKey, JSON.stringify(columns));
+  }, [columns, columnsReady]);
+
+  const addColumn = () => {
+    const label = columnDraft.trim();
+    if (!label) return;
+    const id = `custom-${crypto.randomUUID()}`;
+    setColumns((current) => {
+      const returnIndex = current.findIndex((column) => column.id === "returnStatus");
+      const insertAt = returnIndex === -1 ? current.length : returnIndex + 1;
+      return [...current.slice(0, insertAt), { id, label, kind: "custom" }, ...current.slice(insertAt)];
+    });
+    setColumnDraft("");
+    setColumnPanelOpen(false);
   };
+
+  const moveColumn = (targetId: string) => {
+    if (!draggedColumn || draggedColumn === targetId) return;
+    setColumns((current) => {
+      const sourceIndex = current.findIndex((column) => column.id === draggedColumn);
+      const targetIndex = current.findIndex((column) => column.id === targetId);
+      if (sourceIndex < 0 || targetIndex < 0) return current;
+      const next = current.slice();
+      const [source] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, source);
+      return next;
+    });
+    setDraggedColumn(null);
+  };
+
+  const columnGrid = { gridTemplateColumns: columns.map((column) => column.kind === "batch" ? "220px" : column.kind === "headcount" ? "72px" : "112px").join(" ") };
+
+  const renderCell = (task: ManualTask, column: LedgerColumn) => {
+    if (column.kind === "batch") return <div className="batch-fields"><input aria-label="批次" value={task.batch} onChange={(event) => onChange(task.id, "batch", event.target.value)} placeholder="批次编号" /><div><DateField label="批次开始日期" value={task.batchStart} onChange={(value) => onChange(task.id, "batchStart", value)} /><i>—</i><DateField label="批次结束日期" value={task.batchEnd} onChange={(value) => onChange(task.id, "batchEnd", value)} /></div><button className="ledger-delete" type="button" aria-label="删除任务" onClick={() => onDelete(task.id)}>删除此条</button></div>;
+    if (column.kind === "taskType") return <select aria-label="任务类型" value={task.taskType} onChange={(event) => onChange(task.id, "taskType", event.target.value)}>{taskTypeOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
+    if (column.kind === "headcount") return <input aria-label="人力" value={task.headcount} onChange={(event) => onChange(task.id, "headcount", event.target.value)} inputMode="numeric" placeholder="人数" />;
+    if (column.kind === "startTime") return <DateField label="开始时间" value={task.startTime} onChange={(value) => onChange(task.id, "startTime", value)} />;
+    if (column.kind === "returnTime") return <DateField label="回收时间" value={task.returnTime} onChange={(value) => onChange(task.id, "returnTime", value)} />;
+    if (column.kind === "issueStatus") return <select aria-label="下发状态" value={task.issueStatus} onChange={(event) => onChange(task.id, "issueStatus", event.target.value)}>{issueStatusOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
+    if (column.kind === "returnStatus") return <select aria-label="回收状态" value={task.returnStatus} onChange={(event) => onChange(task.id, "returnStatus", event.target.value)}>{returnStatusOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
+    return <input aria-label={column.label} value={task.customFields?.[column.id] ?? ""} onChange={(event) => onCustomChange(task.id, column.id, event.target.value)} placeholder={column.label} />;
+  };
+
   return <article className="panel task-ledger">
-    <SectionTitle eyebrow="本地任务台账" title="手工登记与编辑任务" note="点击日期框右侧日历按钮选择日期；类目可自行扩展，仅保存在当前浏览器。" extra={<div className="ledger-actions"><button className="ledger-category" type="button" onClick={() => setCategoryPanelOpen((open) => !open)}>＋ 增加类目</button><button className="ledger-add" type="button" onClick={onAdd}>＋ 新增一条</button></div>} />
-    {categoryPanelOpen && <div className="category-editor"><label>新类目<input value={categoryDraft} onChange={(event) => setCategoryDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); submitCategory(); } }} placeholder="例如：SFT复核" /></label><button type="button" onClick={submitCategory} disabled={!categoryDraft.trim()}>添加</button><button className="category-cancel" type="button" onClick={() => { setCategoryPanelOpen(false); setCategoryDraft(""); }}>取消</button><div className="category-list" aria-label="现有类目">{categories.map((category) => <span key={category}>{category}</span>)}</div></div>}
+    <SectionTitle eyebrow="本地任务台账" title="手工登记与编辑任务" note="拖动表头可调整整列位置；新增格子默认在回收状态后面。" extra={<div className="ledger-actions"><button className="ledger-category" type="button" onClick={() => setColumnPanelOpen((open) => !open)}>＋ 增加类目</button><button className="ledger-add" type="button" onClick={onAdd}>＋ 新增一条</button></div>} />
+    {columnPanelOpen && <div className="category-editor"><label>新格子名称<input value={columnDraft} onChange={(event) => setColumnDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addColumn(); } }} placeholder="例如：验收人" /></label><button type="button" onClick={addColumn} disabled={!columnDraft.trim()}>添加到回收状态后</button><button className="category-cancel" type="button" onClick={() => { setColumnPanelOpen(false); setColumnDraft(""); }}>取消</button></div>}
     <div className="task-table">
-      <div className="task-row task-header"><span>批次 / 日期范围</span><span>类目</span><span>人力</span><span>开始时间</span><span>回收时间</span><span>下发状态</span><span>回收状态</span></div>
-      {tasks.map((task) => <div className="task-row" key={task.id}>
-        <div className="batch-fields">
-          <input aria-label="批次" value={task.batch} onChange={(event) => onChange(task.id, "batch", event.target.value)} placeholder="批次编号" />
-          <div><DateField label="批次开始日期" value={task.batchStart} onChange={(value) => onChange(task.id, "batchStart", value)} /><i>—</i><DateField label="批次结束日期" value={task.batchEnd} onChange={(value) => onChange(task.id, "batchEnd", value)} /></div>
-          <button className="ledger-delete" type="button" aria-label="删除任务" onClick={() => onDelete(task.id)}>删除此条</button>
-        </div>
-        <select aria-label="类目" value={task.taskType} onChange={(event) => onChange(task.id, "taskType", event.target.value)}>{categories.map((option) => <option key={option} value={option}>{option}</option>)}</select>
-        <input aria-label="人力" value={task.headcount} onChange={(event) => onChange(task.id, "headcount", event.target.value)} inputMode="numeric" placeholder="人数" />
-        <DateField label="开始时间" value={task.startTime} onChange={(value) => onChange(task.id, "startTime", value)} />
-        <DateField label="回收时间" value={task.returnTime} onChange={(value) => onChange(task.id, "returnTime", value)} />
-        <select aria-label="下发状态" value={task.issueStatus} onChange={(event) => onChange(task.id, "issueStatus", event.target.value)}>{issueStatusOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>
-        <select aria-label="回收状态" value={task.returnStatus} onChange={(event) => onChange(task.id, "returnStatus", event.target.value)}>{returnStatusOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>
-      </div>)}
+      <div className="task-row task-header" style={columnGrid}>{columns.map((column) => <button className={`column-handle ${draggedColumn === column.id ? "dragging" : ""}`} key={column.id} type="button" draggable onDragStart={(event) => { setDraggedColumn(column.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => setDraggedColumn(null)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveColumn(column.id)} title="拖动调整位置">⋮⋮ {column.label}</button>)}</div>
+      {tasks.map((task) => <div className="task-row" key={task.id} style={columnGrid}>{columns.map((column) => <div className="ledger-cell" key={column.id}>{renderCell(task, column)}</div>)}</div>)}
       {!tasks.length && <div className="ledger-empty">当前没有任何数据。点击“新增一条”开始登记。</div>}
     </div>
   </article>;
