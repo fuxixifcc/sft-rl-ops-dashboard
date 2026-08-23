@@ -37,6 +37,7 @@ type DrawerContent = { title: string; eyebrow: string; body: string; metric?: st
 type ManualTask = { id: string; batch: string; batchStart: string; batchEnd: string; taskType: string; ruleVersion: string; headcount: string; subjectCount: string; doubleLabelIncrement: string; startTime: string; returnTime: string; issueStatus: string; returnStatus: string; customFields?: Record<string, string> };
 type LedgerColumn = { id: string; label: string; kind: "batch" | "taskType" | "ruleVersion" | "headcount" | "subjectCount" | "doubleLabelIncrement" | "startTime" | "returnTime" | "issueStatus" | "returnStatus" | "custom" };
 const manualTaskStorageKey = "sft-rl-manual-tasks-v2";
+const submittedManualTaskStorageKey = "sft-rl-submitted-manual-tasks-v1";
 const ledgerColumnStorageKey = "sft-rl-ledger-columns-v1";
 const taskTypeOptions = ["RL标注", "RL质检", "RL返修", "SFT标注", "SFT质检", "SFT返修"];
 const ruleVersionOptions = ["RL旧版", "RLv1.0", "SFT旧版", "SFTv3.0"];
@@ -121,6 +122,7 @@ export default function Home() {
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [manualTasks, setManualTasks] = useState<ManualTask[]>([]);
   const [manualTasksReady, setManualTasksReady] = useState(false);
+  const [submittedManualTasks, setSubmittedManualTasks] = useState<ManualTask[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
@@ -186,9 +188,59 @@ export default function Home() {
     window.localStorage.setItem(manualTaskStorageKey, JSON.stringify(manualTasks));
   }, [manualTasks, manualTasksReady]);
 
-  const activeMetrics = useMemo(() => imported ? mergeImportedMetrics(imported.metrics) : blankMetrics, [imported]);
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(submittedManualTaskStorageKey);
+      queueMicrotask(() => setSubmittedManualTasks(saved ? JSON.parse(saved) as ManualTask[] : []));
+    } catch {
+      // A malformed previous snapshot should not block manual input.
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(submittedManualTaskStorageKey, JSON.stringify(submittedManualTasks));
+  }, [submittedManualTasks]);
+
+  const manualMetrics = useMemo(() => {
+    const metrics = { SFT: { ...blankMetrics.SFT }, RL: { ...blankMetrics.RL } };
+    for (const task of submittedManualTasks) {
+      const lineKey: DataLine = task.taskType.startsWith("RL") ? "RL" : "SFT";
+      const count = Number(task.subjectCount) || 0;
+      const doubleCount = Number(task.doubleLabelIncrement) || 0;
+      const row = metrics[lineKey];
+      if (task.issueStatus === "已下发") { row.weekIssued += count; row.todayIssued += count; }
+      if (task.returnStatus === "完全回收") { row.returned += count; row.completed += count; }
+      else if (task.issueStatus === "已下发") row.returnIncomplete += count;
+      row.qcSelected += doubleCount;
+      if (task.returnStatus === "完全回收") row.qcCompleted += doubleCount;
+      row.qcPending = Math.max(0, row.qcSelected - row.qcCompleted);
+      if (task.taskType.includes("返修")) row.rework += count;
+    }
+    for (const lineKey of ["SFT", "RL"] as DataLine[]) {
+      const row = metrics[lineKey];
+      row.doubleRate = percent(row.qcSelected, row.weekIssued);
+      row.qcPassRate = row.qcSelected ? percent(row.qcCompleted, row.qcSelected) : 0;
+    }
+    return metrics;
+  }, [submittedManualTasks]);
+
+  const manualTrend = useMemo<ImportedTrendPoint[]>(() => {
+    const dates = new Map<string, ImportedTrendPoint>();
+    for (const task of submittedManualTasks) {
+      const date = task.startTime || task.batchStart || "未设日期";
+      const count = Number(task.subjectCount) || 0;
+      const lineKey: DataLine = task.taskType.startsWith("RL") ? "RL" : "SFT";
+      const current = dates.get(date) ?? { date, issued: 0, returned: 0, completed: 0, byLine: { SFT: { issued: 0, returned: 0, completed: 0 }, RL: { issued: 0, returned: 0, completed: 0 } } };
+      if (task.issueStatus === "已下发") { current.issued += count; current.byLine![lineKey].issued += count; }
+      if (task.returnStatus === "完全回收") { current.returned += count; current.completed += count; current.byLine![lineKey].returned += count; current.byLine![lineKey].completed += count; }
+      dates.set(date, current);
+    }
+    return Array.from(dates.values()).sort((a, b) => a.date.localeCompare(b.date)).slice(-5);
+  }, [submittedManualTasks]);
+
+  const activeMetrics = useMemo(() => imported ? mergeImportedMetrics(imported.metrics) : submittedManualTasks.length ? manualMetrics : blankMetrics, [imported, manualMetrics, submittedManualTasks.length]);
   const activeTrend = useMemo<ImportedTrendPoint[]>(() => {
-    const source: ImportedTrendPoint[] = imported ? (imported.workdayTrend ?? []) : [];
+    const source: ImportedTrendPoint[] = imported ? (imported.workdayTrend ?? []) : manualTrend;
     if (line === "ALL") return source.slice(-5);
     return source
       .filter((day) => {
@@ -197,12 +249,12 @@ export default function Home() {
       })
       .slice(-5)
       .map((day) => ({ ...day, ...(day.byLine?.[line] ?? {}) }));
-  }, [imported, line]);
+  }, [imported, line, manualTrend]);
   const activeQualityPools = useMemo(() => imported?.qualityPools ?? [], [imported]);
   const activeBatches = useMemo(() => imported?.batches ?? [], [imported]);
   const activePeople = useMemo(() => imported?.people ?? [], [imported]);
   const activeRules = useMemo(() => imported?.ruleVersions ?? [], [imported]);
-  const reportDate = imported?.report.reportDate ?? "尚未载入";
+  const reportDate = imported?.report.reportDate ?? (submittedManualTasks.length ? "手工提交数据" : "尚未载入");
 
   const metric = (key: keyof typeof lineMetrics.SFT) => line === "ALL" ? combineLineMetric(key, activeMetrics, imported?.rateWeights) : activeMetrics[line][key];
   const weeklyQualityMetric = (key: "selected" | "completed") => {
@@ -296,6 +348,13 @@ export default function Home() {
     setManualTasks((tasks) => [{ id: crypto.randomUUID(), batch: "", batchStart: "", batchEnd: "", taskType: "SFT标注", ruleVersion: "", headcount: "", subjectCount: "", doubleLabelIncrement: "", startTime: "", returnTime: "", issueStatus: "待下发", returnStatus: "未回收" }, ...tasks]);
   }
 
+  function submitManualTasks() {
+    const validTasks = manualTasks.filter((task) => task.batchStart || task.batchEnd || task.subjectCount || task.headcount || task.startTime || task.returnTime);
+    setSubmittedManualTasks(validTasks);
+    setToast(validTasks.length ? `已提交 ${validTasks.length} 条手工记录到看板` : "没有可提交的填写记录");
+    window.setTimeout(() => setToast(""), 3000);
+  }
+
   function updateManualTask(id: string, field: Exclude<keyof ManualTask, "id" | "customFields">, value: string) {
     setManualTasks((tasks) => tasks.map((task) => task.id === id ? { ...task, [field]: value } : task));
   }
@@ -338,7 +397,7 @@ export default function Home() {
         {view === "inventory" && <InventoryBoard data={filteredBatches} line={line} metric={metric} trend={activeTrend} forecast={imported?.forecast} setDrawer={setDrawer} />}
         {view === "versions" && <VersionsBoard data={filteredRules} setDrawer={setDrawer} />}
 
-        {view === "overview" && <ManualTaskLedger tasks={manualTasks} onAdd={addManualTask} onChange={updateManualTask} onCustomChange={updateCustomField} onDelete={(id) => setManualTasks((tasks) => tasks.filter((task) => task.id !== id))} />}
+        {view === "overview" && <ManualTaskLedger tasks={manualTasks} submittedCount={submittedManualTasks.length} onAdd={addManualTask} onSubmit={submitManualTasks} onChange={updateManualTask} onCustomChange={updateCustomField} onDelete={(id) => setManualTasks((tasks) => tasks.filter((task) => task.id !== id))} />}
 
         <div className="local-data-note"><b>数据安全：</b> CSV 在浏览器内存中解析，不会上传或保存。正式上线前仍需公司信息安全审批。</div>
       </section>
@@ -360,7 +419,7 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
   return <span className="date-field"><input ref={inputRef} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} type="date" /><button type="button" aria-label={`选择${label}`} title="选择日期" onClick={openCalendar}>⌄</button></span>;
 }
 
-function ManualTaskLedger({ tasks, onAdd, onChange, onCustomChange, onDelete }: { tasks: ManualTask[]; onAdd: () => void; onChange: (id: string, field: Exclude<keyof ManualTask, "id" | "customFields">, value: string) => void; onCustomChange: (id: string, field: string, value: string) => void; onDelete: (id: string) => void }) {
+function ManualTaskLedger({ tasks, submittedCount, onAdd, onSubmit, onChange, onCustomChange, onDelete }: { tasks: ManualTask[]; submittedCount: number; onAdd: () => void; onSubmit: () => void; onChange: (id: string, field: Exclude<keyof ManualTask, "id" | "customFields">, value: string) => void; onCustomChange: (id: string, field: string, value: string) => void; onDelete: (id: string) => void }) {
   const [columns, setColumns] = useState<LedgerColumn[]>(defaultLedgerColumns);
   const [columnsReady, setColumnsReady] = useState(false);
   const [columnPanelOpen, setColumnPanelOpen] = useState(false);
@@ -442,7 +501,7 @@ function ManualTaskLedger({ tasks, onAdd, onChange, onCustomChange, onDelete }: 
   };
 
   return <article className="panel task-ledger">
-    <SectionTitle eyebrow="本地任务台账" title="手工登记与编辑任务" note="拖动表头可调整整列位置；新增格子默认在回收状态后面。" extra={<div className="ledger-actions"><button className="ledger-category" type="button" onClick={() => setColumnPanelOpen((open) => !open)}>＋ 增加类目</button><button className="ledger-add" type="button" onClick={onAdd}>＋ 新增一条</button></div>} />
+    <SectionTitle eyebrow="本地任务台账" title="手工登记与编辑任务" note={submittedCount ? `已提交 ${submittedCount} 条记录，提交后各模块按手工数据刷新。` : "填写后点击提交到看板，才会刷新其他模块。"} extra={<div className="ledger-actions"><button className="ledger-category" type="button" onClick={() => setColumnPanelOpen((open) => !open)}>＋ 增加类目</button><button className="ledger-add" type="button" onClick={onAdd}>＋ 新增一条</button><button className="ledger-submit" type="button" onClick={onSubmit}>提交到看板</button></div>} />
     {columnPanelOpen && <div className="category-editor"><label>新格子名称<input value={columnDraft} onChange={(event) => setColumnDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addColumn(); } }} placeholder="例如：验收人" /></label><button type="button" onClick={addColumn} disabled={!columnDraft.trim()}>添加到回收状态后</button><button className="category-cancel" type="button" onClick={() => { setColumnPanelOpen(false); setColumnDraft(""); }}>取消</button></div>}
     <div className="task-table">
       <div className="task-row task-header" style={columnGrid}>{columns.map((column) => <div className="column-header" key={column.id}>{editingColumn === column.id ? <><input className="column-name-editor" aria-label="编辑类目名称" value={editingLabel} onChange={(event) => setEditingLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") saveColumnLabel(column.id); if (event.key === "Escape") setEditingColumn(null); }} onBlur={() => saveColumnLabel(column.id)} /><button className="column-edit" type="button" aria-label={`保存 ${column.label}`} title="保存类目名称" onMouseDown={(event) => event.preventDefault()} onClick={() => saveColumnLabel(column.id)}>✎</button><button className="column-remove" type="button" aria-label={`删除 ${column.label}`} title="删除类目列" onMouseDown={(event) => event.preventDefault()} onClick={() => removeColumn(column.id)}>🗑</button></> : <button className={`column-handle ${draggedColumn === column.id ? "dragging" : ""}`} type="button" draggable onClick={() => { if (column.kind === "custom") { setEditingColumn(column.id); setEditingLabel(column.label); } }} onDragStart={(event) => { setDraggedColumn(column.id); event.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => setDraggedColumn(null)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveColumn(column.id)} title={column.kind === "custom" ? "点击编辑；拖动调整位置" : "拖动调整位置"}>⋮⋮ {column.label}</button>}</div>)}<span aria-label="操作" /></div>
